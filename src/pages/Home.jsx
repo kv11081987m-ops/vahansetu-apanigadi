@@ -1365,7 +1365,7 @@ const Home = () => {
                   </div>
                   <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl">
                     <p className="text-[12px] font-bold text-amber-800 text-center leading-relaxed">
-                      Wallet balance sirf ride earnings se milta hai.<br />
+                      Ride Credit aapke referral bonus aur promotions se milta hai.<br />
                       Direct UPI/QR se payment karein.
                     </p>
                   </div>
