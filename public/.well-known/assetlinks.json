@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.vahansetu.apnigadi",
+    "sha256_cert_fingerprints": ["D8:CA:4D:DD:3F:F1:DB:BF:8B:FA:38:39:84:2F:E7:37:3B:89:5E:98:F6:6F:B4:7D:6A:E4:AA:C4:03:A7:CC:2B"]
+  }
+}]

@@ -51,6 +51,8 @@ const mapOptions = {
 
 const LIBRARIES = ['places', 'geometry'];
 
+const PLATFORM_UPI_ID = "soni3233@ybl";
+
 // Computed once at module load — used as constraints for datetime-local inputs
 const generateOtp = () => String(Math.floor(1000 + Math.random() * 9000));
 const nowPlus30Min = () => new Date(Date.now() + 30 * 60 * 1000).toISOString().slice(0, 16);
@@ -86,6 +88,7 @@ const Home = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeSidebarModal, setActiveSidebarModal] = useState(null); // 'history', 'wallet', 'support', 'grievance'
   const [grievancePhone, setGrievancePhone] = useState('7529938896');
+  const [walletTxns, setWalletTxns] = useState(null); // null = not loaded yet
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -115,6 +118,16 @@ const Home = () => {
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (activeSidebarModal !== 'wallet' || !user) return;
+    if (walletTxns !== null) return; // already loaded
+    getDocs(
+      query(collection(db, 'transactions'), where('userId', '==', user.uid), limit(10))
+    ).then(snap => {
+      setWalletTxns(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }).catch(() => setWalletTxns([]));
+  }, [activeSidebarModal, user, walletTxns]);
+
   const { drivers } = useLiveDrivers(service, isLoaded);
   // Drivers count for badge
   const liveDriversCount = drivers.length;
@@ -126,6 +139,7 @@ const Home = () => {
 
   const [routePath, setRoutePath] = useState([]);
   const [altRoutePaths, setAltRoutePaths] = useState([]);
+  const [routeEta, setRouteEta] = useState(null);
   const [distance, setDistance] = useState(null);
   const [fare, setFare] = useState({ savaari: 0, logistics: 0 });
 
@@ -213,6 +227,7 @@ const Home = () => {
     setDestInput('');
     setRoutePath([]);
     setAltRoutePaths([]);
+    setRouteEta(null);
     setDistance(null);
     setBookingId(null);
     setRequestId(null);
@@ -253,6 +268,7 @@ const Home = () => {
           setAltRoutePaths(alts);
           const route = result.routes[0].legs[0];
           setDistance((route.distance.value / 1000).toFixed(1));
+          setRouteEta({ duration: route.duration.text, distance: route.distance.text });
           const distKm = route.distance.value / 1000;
           setFare({
             savaari: computeFare(distKm, 0, 'savaari', config).total,
@@ -596,6 +612,19 @@ const Home = () => {
   };
 
 
+  // Fix 6: Backup listener — auto-advance passenger when driver marks payment_done
+  useEffect(() => {
+    if (bookingStatus !== 'completed' || !requestId) return;
+    const unsub = onSnapshot(doc(db, 'ride_requests', requestId), (snap) => {
+      if (!snap.exists()) return;
+      const s = snap.data().status;
+      if (s === 'payment_done' || s === 'paid') {
+        setBookingStatus('payment_done');
+      }
+    });
+    return () => unsub();
+  }, [bookingStatus, requestId]);
+
   // Show rating modal after payment
   useEffect(() => {
     if (bookingStatus === 'payment_done' || bookingStatus === 'paid') {
@@ -730,25 +759,6 @@ const Home = () => {
     }
   };
 
-  const handleSimulateSuccess = async () => {
-    if (!requestId || isPaymentLoading) return;
-    setIsPaymentLoading(true);
-    try {
-      const rideSnap = await getDoc(doc(db, 'ride_requests', requestId));
-      if (!rideSnap.exists()) return;
-      const rideData = rideSnap.data();
-      if (rideData.status === 'payment_done' || rideData.status === 'paid') {
-        setActiveRide(null);
-        return;
-      }
-      await handlePaymentSuccess('online');
-    } catch (err) {
-      console.error('Simulate payment error:', err);
-      showToast('Payment process mein error aaya. Dobara try karein.', 'error');
-    } finally {
-      setIsPaymentLoading(false);
-    }
-  };
 
   const handleSOS = async () => {
     if (!requestId) return;
@@ -907,17 +917,23 @@ const Home = () => {
       <div className="absolute inset-0 z-0">
         {isLoaded ? (
           <GoogleMap mapContainerStyle={containerStyle} center={pickup || center} zoom={14} options={mapOptions} onLoad={onMapLoad}>
-            {/* Fix 4: Alternate routes — light gray, behind primary */}
+            {/* Fix 4: Alternate routes — clickable gray, tap to select */}
             {altRoutePaths.map((path, i) => (
               <Polyline
                 key={`alt-route-${i}`}
                 path={path}
+                onClick={() => {
+                  const newAlt = [routePath, ...altRoutePaths.filter((_, j) => j !== i)];
+                  setRoutePath(path);
+                  setAltRoutePaths(newAlt);
+                }}
                 options={{
                   strokeColor: '#94a3b8',
-                  strokeOpacity: 0.45,
-                  strokeWeight: 5,
+                  strokeOpacity: 0.6,
+                  strokeWeight: 6,
                   zIndex: 0,
                   lineCap: 'round',
+                  clickable: true,
                 }}
               />
             ))}
@@ -994,6 +1010,15 @@ const Home = () => {
           </GoogleMap>
         ) : <div className="w-full h-full bg-slate-100" />}
       </div>
+
+      {/* Fix 5: ETA + Distance pill — shown on map during idle when route is calculated */}
+      {routeEta && bookingStatus === 'idle' && (
+        <div className="absolute left-1/2 -translate-x-1/2 z-[30] flex items-center gap-3 bg-slate-900/90 backdrop-blur-sm text-white px-5 py-2 rounded-full text-sm shadow-lg pointer-events-none" style={{ bottom: '46vh' }}>
+          <span className="font-bold">{routeEta.duration}</span>
+          <span className="text-slate-500">·</span>
+          <span className="font-bold">{routeEta.distance}</span>
+        </div>
+      )}
 
       {/* SOS Emergency Button — direct 112 dial during active ride */}
       {(bookingStatus === 'accepted' || bookingStatus === 'started') && (
@@ -1361,7 +1386,7 @@ const Home = () => {
                       <IndianRupee size={32} />
                     </div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ride Credit Balance</p>
-                    <h2 className="text-4xl font-black text-slate-800 mt-1">₹0.00</h2>
+                    <h2 className="text-4xl font-black text-slate-800 mt-1">₹{Number(userProfile?.balance || 0).toFixed(2)}</h2>
                   </div>
                   <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl">
                     <p className="text-[12px] font-bold text-amber-800 text-center leading-relaxed">
@@ -1371,12 +1396,24 @@ const Home = () => {
                   </div>
                   <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Recent Transactions</p>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <span className="text-[11px] font-bold text-slate-700">Ride Payment</span>
-                        <span className="text-xs font-black text-red-500">-₹120</span>
+                    {walletTxns === null ? (
+                      <div className="space-y-2">
+                        {[1,2].map(i => <div key={i} className="h-8 bg-slate-200 rounded-xl animate-pulse" />)}
                       </div>
-                    </div>
+                    ) : walletTxns.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 font-bold text-center py-3">Abhi tak koi transaction nahi</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {walletTxns.map(tx => (
+                          <div key={tx.id} className="flex justify-between items-center">
+                            <span className="text-[11px] font-bold text-slate-700">
+                              {tx.method === 'cash' ? 'Cash Ride' : tx.method === 'online' ? 'Online Ride' : 'Ride Payment'}
+                            </span>
+                            <span className="text-xs font-black text-red-500">-₹{tx.amount}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1391,10 +1428,10 @@ const Home = () => {
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">We are here to help you 24/7</p>
                   </div>
                   <div className="space-y-4">
-                    <button onClick={() => window.open('https://wa.me/917084605722', '_blank')} className="w-full p-5 bg-emerald-600 text-white rounded-3xl flex items-center justify-center gap-4 font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all">
+                    <button onClick={() => window.open(`https://wa.me/91${grievancePhone}`, '_blank')} className="w-full p-5 bg-emerald-600 text-white rounded-3xl flex items-center justify-center gap-4 font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all">
                       CHAT ON WHATSAPP
                     </button>
-                    <button onClick={() => window.location.href = 'tel:+917084605722'} className="w-full p-5 bg-slate-900 text-white rounded-3xl flex items-center justify-center gap-4 font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all">
+                    <button onClick={() => window.location.href = `tel:+91${grievancePhone}`} className="w-full p-5 bg-slate-900 text-white rounded-3xl flex items-center justify-center gap-4 font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all">
                       CALL SUPPORT
                     </button>
                   </div>
@@ -1930,7 +1967,7 @@ const Home = () => {
               {/* UPI QR Code */}
               <div className="p-4 bg-white rounded-2xl shadow-inner border border-slate-100">
                 <QRCodeCanvas
-                  value={`upi://pay?pa=vahan.setu@dummyupi&pn=VahanSetu&am=${currentFareBreakup.total}&cu=INR`}
+                  value={`upi://pay?pa=${PLATFORM_UPI_ID}&pn=VahanSetu&am=${currentFareBreakup.total}&cu=INR`}
                   size={160}
                   level="H"
                 />
@@ -1943,6 +1980,15 @@ const Home = () => {
                 <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse flex-shrink-0" />
                 <p className="text-[11px] font-bold text-blue-700">Driver payment confirm kar raha hai...</p>
               </div>
+
+              {/* Fix 6: Passenger UPI self-confirm */}
+              <button
+                onClick={() => handlePaymentSuccess('online')}
+                disabled={isPaymentLoading}
+                className="w-full py-3.5 bg-blue-600 active:bg-blue-700 text-white rounded-2xl font-black text-sm shadow-lg active:scale-95 transition-all disabled:opacity-50"
+              >
+                Maine UPI se Pay Kar Diya ✓
+              </button>
             </div>
           </div>
         )}

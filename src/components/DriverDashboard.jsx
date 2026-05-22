@@ -45,7 +45,7 @@ const LIBRARIES = ['places', 'geometry'];
 const TEST_DRIVER_ID = "";
 
 // Separate component so useJsApiLoader only fires when the map is actually needed
-const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, mapRef }) => {
+const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, mapRef, driverHeading = 0 }) => {
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
@@ -56,6 +56,7 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
   const [routePath, setRoutePath] = useState([]);
   const [routeColor, setRouteColor] = useState('#4A90D9');
   const [routeInfo, setRouteInfo] = useState(null); // { duration, distance, arrivalTime }
+  const [routeTick, setRouteTick] = useState(0);
 
   const driverLocation = driverGpsLocation || profileLocation;
 
@@ -70,6 +71,13 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
     map.setHeading(0);
     map.setZoom(15);
   }, [map, driverLocation]);
+
+  // Fix 2: 15-second route refresh tick
+  useEffect(() => {
+    if (!isLoaded || !newRequest || !map) return;
+    const id = setInterval(() => setRouteTick(t => t + 1), 15000);
+    return () => clearInterval(id);
+  }, [isLoaded, newRequest, map]);
 
   useEffect(() => {
     if (!isLoaded || !newRequest || !map) return;
@@ -119,7 +127,7 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
       setRoutePath([]);
       setRouteInfo(null);
     }
-  }, [isLoaded, newRequest, driverGpsLocation, profileLocation, map]);
+  }, [isLoaded, newRequest, driverGpsLocation, profileLocation, map, routeTick]);
 
   if (!isLoaded) return <div className="w-full h-full bg-slate-100 animate-pulse" />;
 
@@ -145,12 +153,13 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
           <Marker
             position={driverGpsLocation || profileLocation}
             icon={{
-              path: window.google.maps.SymbolPath.CIRCLE,
-              scale: 10,
+              path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+              scale: 6,
               fillColor: '#3b82f6',
               fillOpacity: 1,
               strokeColor: '#ffffff',
-              strokeWeight: 3,
+              strokeWeight: 2,
+              rotation: driverHeading,
             }}
             title="Meri Location"
           />
@@ -486,6 +495,7 @@ const DriverDashboard = () => {
   const [isOnline, setIsOnline] = useState(false);
   const [profile, setProfile] = useState(null);
   const [driverGpsLocation, setDriverGpsLocation] = useState(null);
+  const [driverHeading, setDriverHeading] = useState(0);
   const [newRequest, setNewRequest] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [language, setLanguage] = useState('en'); 
@@ -554,6 +564,11 @@ const DriverDashboard = () => {
       setIsDriverCardMinimized(false);
     }
 
+    // Fix 5: toast when passenger pays online (driver-side)
+    if (currId && newRequest?.status === 'payment_done' && prevStatus && prevStatus !== 'payment_done') {
+      showToast('Payment aa gaya! ✅ Passenger ne pay kar diya.', 'success');
+    }
+
     prevNewRequestIdRef.current = currId;
     prevNewRequestStatusRef.current = newRequest?.status || null;
   }, [newRequest, showToast]);
@@ -566,13 +581,14 @@ const DriverDashboard = () => {
 
     const watchId = navigator.geolocation.watchPosition(
       async (pos) => {
-        const { latitude, longitude, speed } = pos.coords;
+        const { latitude, longitude, speed, heading } = pos.coords;
         const now = Date.now();
         const elapsed = (now - lastPositionTime) / 1000; // seconds since last ping
         lastPositionTime = now;
 
         // Update local GPS state for map marker — avoids Firestore-triggered re-renders
         setDriverGpsLocation({ lat: latitude, lng: longitude });
+        if (heading != null && !isNaN(heading)) setDriverHeading(heading);
 
         await updateDoc(doc(db, 'drivers', driverId), {
           location: { lat: latitude, lng: longitude },
@@ -1036,7 +1052,7 @@ const DriverDashboard = () => {
       });
 
       await updateDoc(doc(db, 'drivers', driverId), {
-        walletBalance: (stats.walletBalance || 0) - amount
+        walletBalance: increment(-amount)
       });
 
       alert("Request Sent!");
@@ -1124,6 +1140,7 @@ const DriverDashboard = () => {
             newRequest={newRequest}
             profileLocation={profile?.location}
             mapRef={mapRef}
+            driverHeading={driverHeading}
           />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200" />
