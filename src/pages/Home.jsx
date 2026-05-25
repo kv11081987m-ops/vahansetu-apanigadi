@@ -754,18 +754,15 @@ const Home = () => {
 
   const handleSOS = async () => {
     if (!requestId) return;
-    const confirmSOS = window.confirm("🚨 EMERGENCY: Do you want to trigger SOS alert? This will notify emergency services.");
-    if (confirmSOS) {
-      try {
-        await updateDoc(doc(db, 'ride_requests', requestId), { 
-          status: 'emergency',
-          emergencyTriggeredBy: 'passenger',
-          emergencyTime: serverTimestamp()
-        });
-        alert("SOS Alert Triggered! Help is on the way. Please stay safe.");
-      } catch (err) {
-        console.error("SOS Error:", err);
-      }
+    try {
+      await updateDoc(doc(db, 'ride_requests', requestId), {
+        status: 'emergency',
+        emergencyTriggeredBy: 'passenger',
+        emergencyTime: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("SOS Firestore error:", err);
+      // Don't block 112 dial even if Firestore write fails
     }
   };
 
@@ -1014,10 +1011,13 @@ const Home = () => {
         </div>
       )}
 
-      {/* SOS Emergency Button — direct 112 dial during active ride */}
+      {/* SOS Emergency Button — logs to Firestore then dials 112 */}
       {(bookingStatus === 'accepted' || bookingStatus === 'started') && (
         <button
-          onClick={() => window.open('tel:112')}
+          onClick={async () => {
+            await handleSOS();
+            window.open('tel:112');
+          }}
           className="fixed bottom-32 right-4 z-[500] bg-red-600 text-white font-black text-[11px] rounded-full shadow-2xl shadow-red-600/50 active:scale-90 transition-all border-2 border-red-400 flex items-center justify-center"
           style={{ width: 56, height: 56 }}
         >
