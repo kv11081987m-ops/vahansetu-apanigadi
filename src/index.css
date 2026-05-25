@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-professional-blue-light: #60A5FA;
+  --color-professional-blue-primary: #3B82F6;
+  --color-professional-blue-dark: #1E40AF;
+  --color-professional-blue-deep: #1E3A8A;
+
+  --color-eco-green-light: #34D399;
+  --color-eco-green-primary: #10B981;
+  --color-eco-green-dark: #059669;
+  --color-eco-green-deep: #064E3B;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-accent: "Outfit", sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased font-sans;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-accent font-bold;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-professional-blue-primary text-white px-6 py-3 rounded-xl font-semibold transition-all hover:bg-professional-blue-dark hover:shadow-lg active:scale-95;
+  }
+
+  .btn-secondary {
+    @apply bg-eco-green-primary text-white px-6 py-3 rounded-xl font-semibold transition-all hover:bg-eco-green-dark hover:shadow-lg active:scale-95;
+  }
+
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-md border border-white/20 rounded-2xl shadow-xl;
+  }
+}

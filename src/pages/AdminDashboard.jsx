@@ -31,7 +31,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
 import { QRCodeCanvas } from 'qrcode.react';
 import { db } from '../services/firebase';
-import { collection, query, onSnapshot, orderBy, limit, doc, updateDoc, addDoc, serverTimestamp, increment, setDoc, getDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, limit, doc, updateDoc, addDoc, serverTimestamp, increment, setDoc, getDoc, writeBatch } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 
 const AdminDashboard = () => {
@@ -85,6 +85,12 @@ const AdminDashboard = () => {
   const [adjustAmounts, setAdjustAmounts] = useState({});
   const [driverPrivateData, setDriverPrivateData] = useState({}); // driverId → { adminTempAccess }
   const [referrals, setReferrals] = useState([]);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -171,10 +177,10 @@ const AdminDashboard = () => {
     setConfigSaving(true);
     try {
       await setDoc(doc(db, 'config', 'platform'), platformConfig, { merge: true });
-      alert('Settings saved successfully!');
+      showToast('Settings saved successfully!');
     } catch (err) {
       console.error(err);
-      alert('Error saving settings: ' + err.message);
+      showToast('Error saving settings: ' + err.message, 'error');
     } finally {
       setConfigSaving(false);
     }
@@ -205,8 +211,11 @@ const AdminDashboard = () => {
 
   const handleApproveKYC = async (id) => {
     try {
-      await updateDoc(doc(db, 'drivers', id), { verificationStatus: 'verified' });
-      alert("Driver verified successfully!");
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'drivers', id), { verificationStatus: 'verified' });
+      batch.update(doc(db, 'users', id), { verificationStatus: 'verified' });
+      await batch.commit();
+      showToast("Driver verified successfully!");
     } catch (err) {
       console.error(err);
     }
@@ -214,8 +223,11 @@ const AdminDashboard = () => {
 
   const handleRejectKYC = async (id) => {
     try {
-      await updateDoc(doc(db, 'drivers', id), { verificationStatus: 'rejected' });
-      alert("Driver KYC rejected.");
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'drivers', id), { verificationStatus: 'rejected' });
+      batch.update(doc(db, 'users', id), { verificationStatus: 'rejected' });
+      await batch.commit();
+      showToast("Driver KYC rejected.", 'error');
     } catch (err) {
       console.error(err);
     }
@@ -242,10 +254,10 @@ const AdminDashboard = () => {
         createdAt: serverTimestamp()
       });
 
-      alert("Payout marked as completed successfully!");
+      showToast("Payout marked as completed successfully!");
     } catch (err) {
       console.error(err);
-      alert("Error: " + err.message);
+      showToast("Error: " + err.message, 'error');
     }
   };
 
@@ -258,7 +270,7 @@ const AdminDashboard = () => {
         timestamp: serverTimestamp()
       });
       setBroadcastMessage('');
-      alert("Broadcast sent to all drivers!");
+      showToast("Broadcast sent to all drivers!");
     } catch (err) {
       console.error(err);
     }
@@ -272,7 +284,7 @@ const AdminDashboard = () => {
         cancelledBy: 'admin',
         cancelledAt: serverTimestamp()
       });
-      alert("Ride cancelled successfully.");
+      showToast("Ride cancelled successfully.");
     } catch (err) {
       console.error(err);
     }
@@ -282,14 +294,19 @@ const AdminDashboard = () => {
     if (!window.confirm("DANGEROUS: This will cancel ALL active/pending rides across the entire system. Proceed?")) return;
     try {
       const activeRides = recentRides.filter(r => ['pending', 'accepted', 'started', 'completed', 'payment_done'].includes(r.status));
-      for (const ride of activeRides) {
-        await updateDoc(doc(db, 'ride_requests', ride.id), { 
-          status: 'cancelled',
-          cancelledBy: 'admin_nuclear',
-          cancelledAt: serverTimestamp()
+      const BATCH_LIMIT = 500;
+      for (let i = 0; i < activeRides.length; i += BATCH_LIMIT) {
+        const batch = writeBatch(db);
+        activeRides.slice(i, i + BATCH_LIMIT).forEach(ride => {
+          batch.update(doc(db, 'ride_requests', ride.id), {
+            status: 'cancelled',
+            cancelledBy: 'admin_nuclear',
+            cancelledAt: serverTimestamp()
+          });
         });
+        await batch.commit();
       }
-      alert(`Cleanup complete! ${activeRides.length} rides cleared.`);
+      showToast(`Cleanup complete! ${activeRides.length} rides cleared.`);
     } catch (err) {
       console.error(err);
     }
@@ -298,19 +315,19 @@ const AdminDashboard = () => {
   const handleGrantTempAccess = async (driverId) => {
     await setDoc(doc(db, 'drivers', driverId, 'private', 'data'), { adminTempAccess: true }, { merge: true });
     setDriverPrivateData(prev => ({ ...prev, [driverId]: { adminTempAccess: true } }));
-    alert("Temp access granted!");
+    showToast("Temp access granted!");
   };
 
   const handleRevokeTempAccess = async (driverId) => {
     await setDoc(doc(db, 'drivers', driverId, 'private', 'data'), { adminTempAccess: false }, { merge: true });
     setDriverPrivateData(prev => ({ ...prev, [driverId]: { adminTempAccess: false } }));
-    alert("Temp access revoked.");
+    showToast("Temp access revoked.", 'error');
   };
 
   const handleWalletAdjust = async (driver, type) => {
     const raw = adjustAmounts[driver.id];
     const amount = Number(raw);
-    if (!amount || amount <= 0) return alert("Valid amount darj karo.");
+    if (!amount || amount <= 0) { showToast("Valid amount darj karo.", 'error'); return; }
     const delta = type === 'credit' ? amount : -amount;
     try {
       await updateDoc(doc(db, 'drivers', driver.id), {
@@ -325,10 +342,10 @@ const AdminDashboard = () => {
         createdAt: serverTimestamp()
       });
       setAdjustAmounts(prev => ({ ...prev, [driver.id]: '' }));
-      alert(`Wallet ${type === 'credit' ? 'credited' : 'debited'} ₹${amount} for ${driver.name}`);
+      showToast(`Wallet ${type === 'credit' ? 'credited' : 'debited'} ₹${amount} for ${driver.name}`);
     } catch (err) {
       console.error(err);
-      alert("Error: " + err.message);
+      showToast("Error: " + err.message, 'error');
     }
   };
 
@@ -480,7 +497,7 @@ const AdminDashboard = () => {
 </html>`;
 
     const win = window.open('', '_blank');
-    if (!win) { alert('Popup blocked. Please allow popups for this site.'); return; }
+    if (!win) { showToast('Popup blocked. Please allow popups for this site.', 'error'); return; }
     win.document.write(html);
     win.document.close();
   };
@@ -509,7 +526,7 @@ const AdminDashboard = () => {
 
   const handleAddDriver = async (e) => {
     e.preventDefault();
-    if (!genName || !genPhone) return alert("Please enter name and phone");
+    if (!genName || !genPhone) { showToast("Please enter name and phone", 'error'); return; }
     
     try {
       await addDoc(collection(db, 'drivers'), {
@@ -520,12 +537,12 @@ const AdminDashboard = () => {
         rating: 5.0,
         createdAt: serverTimestamp()
       });
-      alert("Driver Registered Successfully!");
+      showToast("Driver Registered Successfully!");
       setGenName('');
       setGenPhone('');
     } catch (err) {
       console.error(err);
-      alert("Error adding driver");
+      showToast("Error adding driver", 'error');
     }
   };
 
@@ -547,6 +564,12 @@ const AdminDashboard = () => {
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-300 flex font-sans">
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-5 left-1/2 -translate-x-1/2 z-[9999] px-5 py-3 rounded-2xl text-white text-sm font-bold shadow-2xl transition-all ${toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`}>
+          {toast.msg}
+        </div>
+      )}
       {/* Sidebar */}
       <aside className="w-72 bg-[#1e293b] border-r border-slate-800 flex flex-col p-6 hidden lg:flex">
         <div className="flex items-center gap-3 mb-12 px-2">
@@ -714,7 +737,7 @@ const AdminDashboard = () => {
                         if (driver.location?.lat && driver.location?.lng) {
                           setSelectedDriver(driver);
                         } else {
-                          alert(`${driver.name} has no live location data yet.`);
+                          showToast(`${driver.name} has no live location data yet.`, 'error');
                         }
                       }}
                       className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700 flex justify-between items-center hover:bg-slate-700/50 transition-all text-left w-full"
@@ -1299,7 +1322,7 @@ const AdminDashboard = () => {
                     <button 
                       onClick={() => {
                         navigator.clipboard.writeText(generatedLink);
-                        alert("Link copied to clipboard!");
+                        showToast("Link copied to clipboard!");
                       }}
                       className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black tracking-widest text-[10px] uppercase shadow-xl shadow-blue-600/20"
                     >

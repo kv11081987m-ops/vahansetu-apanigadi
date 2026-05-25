@@ -175,6 +175,7 @@ const Home = () => {
   const [altRoutePaths, setAltRoutePaths] = useState([]);
   const [routeEta, setRouteEta] = useState(null);
   const [distance, setDistance] = useState(null);
+  const [distanceKm, setDistanceKm] = useState(0);
   const [fare, setFare] = useState({ savaari: 0, logistics: 0 });
 
   const [bookingStatus, setBookingStatus] = useState('idle');
@@ -183,6 +184,7 @@ const Home = () => {
   const [matchedDriver, setMatchedDriver] = useState(null);
   const [otp, setOtp] = useState(null);
   const activeRequestUnsubRef = useRef(null);
+  const cancelTimeoutRef = useRef(null);
   const [showRating, setShowRating] = useState(false);
   const [userRating, setUserRating] = useState(0);
   const [hoveredRating, setHoveredRating] = useState(0);
@@ -272,6 +274,7 @@ const Home = () => {
     setAltRoutePaths([]);
     setRouteEta(null);
     setDistance(null);
+    setDistanceKm(0);
     setBookingId(null);
     setRequestId(null);
     setMatchedDriver(null);
@@ -287,6 +290,7 @@ const Home = () => {
     setNoDriverFound(false);
     searchAbortRef.current = true;
     retryParamsRef.current = null;
+    if (cancelTimeoutRef.current) { clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null; }
     if (activeRequestUnsubRef.current) { activeRequestUnsubRef.current(); activeRequestUnsubRef.current = null; }
   }, []);
 
@@ -310,9 +314,10 @@ const Home = () => {
           );
           setAltRoutePaths(alts);
           const route = result.routes[0].legs[0];
-          setDistance((route.distance.value / 1000).toFixed(1));
-          setRouteEta({ duration: route.duration.text, distance: route.distance.text });
           const distKm = route.distance.value / 1000;
+          setDistance(distKm.toFixed(1));
+          setDistanceKm(distKm);
+          setRouteEta({ duration: route.duration.text, distance: route.distance.text });
           setFare({
             savaari: computeFare(distKm, 0, 'savaari', config).total,
             logistics: computeFare(distKm, 0, 'logistics', config).total
@@ -584,6 +589,7 @@ const Home = () => {
       destination,
       fare: vType === 'battery_rickshaw' ? fare.savaari : fare.logistics,
       fareAmount: vType === 'battery_rickshaw' ? fare.savaari : fare.logistics,
+      distanceKm: distanceKm || 0,
       status: 'pending',
       otp: rideOtp,
       createdAt: serverTimestamp(),
@@ -593,7 +599,7 @@ const Home = () => {
     setRequestId(requestRef.id);
 
     // Auto-cancel if no driver accepts within 5 minutes
-    const cancelTimeout = setTimeout(async () => {
+    cancelTimeoutRef.current = setTimeout(async () => {
       if (searchAbortRef.current) return;
       try {
         await updateDoc(doc(db, 'ride_requests', requestRef.id), {
@@ -610,7 +616,7 @@ const Home = () => {
       const status = data.status;
 
       if (status === 'accepted') {
-        clearTimeout(cancelTimeout);
+        clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null;
         if (data.driverId !== 'broadcast') {
           // Fetch driver phone so Call Driver button works
           getDoc(doc(db, 'drivers', data.driverId)).then(dSnap => {
@@ -630,16 +636,16 @@ const Home = () => {
       } else if (status === 'completed') {
         setBookingStatus('completed');
       } else if (status === 'paid' || status === 'payment_done') {
-        clearTimeout(cancelTimeout);
+        clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null;
         setBookingStatus('payment_done');
         unsub();
       } else if (status === 'rejected') {
-        clearTimeout(cancelTimeout);
+        clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null;
         showToast('Driver abhi busy hai. Kripya dobara try karein.', 'error');
         setBookingStatus('idle');
         unsub();
       } else if (status === 'cancelled') {
-        clearTimeout(cancelTimeout);
+        clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null;
         showToast('Aapki ride cancel ho gayi.', 'error');
         handleReset();
         unsub();
@@ -681,19 +687,19 @@ const Home = () => {
     }
   }, [bookingStatus]);
 
-  const scheduleMin = useMemo(() => nowPlus30Min(), []);
-  const scheduleMax = useMemo(() => nowPlus7Days(), []);
+  const scheduleMin = nowPlus30Min();
+  const scheduleMax = nowPlus7Days();
 
   // Fetch upcoming scheduled rides when sidebar modal opens
   useEffect(() => {
     if (activeSidebarModal !== 'scheduled' || !user) return;
     startTransition(() => { setScheduledRidesLoading(true); });
-    getDocs(query(collection(db, 'ride_requests'), where('userId', '==', user.uid), limit(100)))
+    getDocs(query(collection(db, 'ride_requests'), where('userId', '==', user.uid), where('status', '==', 'scheduled'), limit(20)))
       .then(snap => {
         const now = Date.now();
         const rides = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
-          .filter(r => r.status === 'scheduled' && (r.scheduledAt?.toMillis?.() || 0) > now)
+          .filter(r => (r.scheduledAt?.toMillis?.() || 0) > now)
           .sort((a, b) => (a.scheduledAt?.toMillis?.() || 0) - (b.scheduledAt?.toMillis?.() || 0));
         setScheduledRides(rides);
       })

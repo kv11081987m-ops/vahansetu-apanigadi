@@ -707,7 +707,7 @@ const DriverDashboard = () => {
         console.error("Location Error:", err);
         setLocationError('GPS error: Location update band ho gayi. Dobara try karein.');
       },
-      { enableHighAccuracy: true, maximumAge: 5000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
@@ -794,27 +794,16 @@ const DriverDashboard = () => {
 
   useEffect(() => {
     if (!driverId) return;
-    const fetchTransactions = async () => {
-      try {
-        const txQuery = query(
-          collection(db, 'wallet_transactions'),
-          where('driverId', '==', driverId),
-          orderBy('createdAt', 'desc'),
-          limit(100)
-        );
-
-        const txSnap = await getDocs(txQuery);
-        const txData = txSnap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setWalletTransactions(txData);
-      } catch (err) {
-        console.error("Error fetching transactions:", err);
-      }
-    };
-
-    fetchTransactions();
+    const txQuery = query(
+      collection(db, 'wallet_transactions'),
+      where('driverId', '==', driverId),
+      orderBy('createdAt', 'desc'),
+      limit(100)
+    );
+    const unsub = onSnapshot(txQuery, (snap) => {
+      setWalletTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error("Error fetching transactions:", err));
+    return () => unsub();
   }, [driverId]);
 
   // System Broadcast Listener
@@ -895,23 +884,23 @@ const DriverDashboard = () => {
     }
   }, [activeRide, driverId, rideContextLoading, lastRequestId]);
 
-  // Restore pending payment ride from localStorage on mount (survives any time-window filter)
+  // Restore pending payment ride from localStorage — real-time listener auto-clears if paid
   useEffect(() => {
     if (!driverId) return;
     const pendingId = localStorage.getItem('pendingPaymentRideId');
     if (!pendingId) return;
-    getDoc(doc(db, 'ride_requests', pendingId))
-      .then(snap => {
-        if (!snap.exists()) { localStorage.removeItem('pendingPaymentRideId'); return; }
-        const data = { id: snap.id, ...snap.data() };
-        if (data.status === 'completed' && data.driverId === driverId) {
-          setPendingPaymentRide(data);
-        } else {
-          // Already paid or belongs to different driver
-          localStorage.removeItem('pendingPaymentRideId');
-        }
-      })
-      .catch(err => console.error('Pending payment restore error:', err));
+    const unsub = onSnapshot(doc(db, 'ride_requests', pendingId), (snap) => {
+      if (!snap.exists()) { localStorage.removeItem('pendingPaymentRideId'); setPendingPaymentRide(null); return; }
+      const data = { id: snap.id, ...snap.data() };
+      if (data.status === 'completed' && data.driverId === driverId) {
+        setPendingPaymentRide(data);
+      } else {
+        // Already paid or belongs to different driver — clear card
+        localStorage.removeItem('pendingPaymentRideId');
+        setPendingPaymentRide(null);
+      }
+    }, (err) => console.error('Pending payment restore error:', err));
+    return () => unsub();
   }, [driverId]);
 
   // On-mount recovery: restore active ride after page refresh.
@@ -1046,7 +1035,7 @@ const DriverDashboard = () => {
       return;
     }
 
-    if (enteredOtp === newRequest.otp?.toString()) {
+    if (enteredOtp.trim() === newRequest.otp?.toString().trim()) {
       await updateDoc(doc(db, 'ride_requests', newRequest.id), {
         status: 'started',
         startedAt: serverTimestamp()
@@ -1070,10 +1059,10 @@ const DriverDashboard = () => {
 
   // Fare breakup for active completed ride (in newRequest card)
   const driverFareBreakup = useMemo(() => {
-    if (!newRequest?.pickup || !newRequest?.destination) return null;
-    const distKm = calculateDistance(
-      Number(newRequest.pickup.lat), Number(newRequest.pickup.lng),
-      Number(newRequest.destination.lat), Number(newRequest.destination.lng)
+    if (!newRequest) return null;
+    const distKm = newRequest.distanceKm || calculateDistance(
+      Number(newRequest.pickup?.lat), Number(newRequest.pickup?.lng),
+      Number(newRequest.destination?.lat), Number(newRequest.destination?.lng)
     );
     const serviceType = newRequest.vehicleType === 'battery_rickshaw' ? 'savaari' : 'logistics';
     return computeFare(distKm, newRequest.waitingSeconds || 0, serviceType, config);
@@ -1081,10 +1070,10 @@ const DriverDashboard = () => {
 
   // Fare breakup for pending payment ride (localStorage-restored, separate from newRequest)
   const pendingFareBreakup = useMemo(() => {
-    if (!pendingPaymentRide?.pickup || !pendingPaymentRide?.destination) return null;
-    const distKm = calculateDistance(
-      Number(pendingPaymentRide.pickup.lat), Number(pendingPaymentRide.pickup.lng),
-      Number(pendingPaymentRide.destination.lat), Number(pendingPaymentRide.destination.lng)
+    if (!pendingPaymentRide) return null;
+    const distKm = pendingPaymentRide.distanceKm || calculateDistance(
+      Number(pendingPaymentRide.pickup?.lat), Number(pendingPaymentRide.pickup?.lng),
+      Number(pendingPaymentRide.destination?.lat), Number(pendingPaymentRide.destination?.lng)
     );
     const serviceType = pendingPaymentRide.vehicleType === 'battery_rickshaw' ? 'savaari' : 'logistics';
     return computeFare(distKm, pendingPaymentRide.waitingSeconds || 0, serviceType, config);
@@ -2207,7 +2196,7 @@ const DriverDashboard = () => {
                 {rideHistory.map(ride => {
                   const { label, color } = statusMeta(ride.status);
                   const isLogistics = ride.vehicleType === 'chhota_hathi';
-                  const earned = ride.fareAmount ? Math.round(ride.fareAmount * 0.92) : null;
+                  const earned = ride.fareAmount ? Math.round(ride.fareAmount * (1 - (config?.commissionPercent || 8) / 100)) : null;
                   return (
                     <div key={ride.id} className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm">
                       <div className="flex justify-between items-start mb-3">

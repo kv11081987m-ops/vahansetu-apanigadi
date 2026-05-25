@@ -109,7 +109,7 @@ export const RideProvider = ({ children }) => {
 
     const unsub = onSnapshot(q, (snapshot) => {
       if (!snapshot.empty) {
-        const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
+        const thirtyMinAgo = Date.now() - 60 * 60 * 1000;
         const eightHoursAgo = Date.now() - 8 * 60 * 60 * 1000;
         const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000;
         const docs = snapshot.docs

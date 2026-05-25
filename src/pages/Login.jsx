@@ -179,7 +179,6 @@ const Login = () => {
         ...(newPassword && { password: newPassword }),
       });
 
-      alert(`Welcome ${profile.name}! Aapka VahanSetu ID: ${profile.displayId}`);
       navigate(role === 'driver' ? '/dashboard' : '/home');
     } catch (err) {
       console.error(err);
