@@ -8,6 +8,7 @@ import {
   EmailAuthProvider,
   signOut,
   setPersistence,
+  indexedDBLocalPersistence,
   browserLocalPersistence
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, increment, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
@@ -124,9 +125,11 @@ export const AuthProvider = ({ children }) => {
 
     let unsubscribe = () => {};
 
-    // setPersistence await karna zaroori hai — warna onAuthStateChanged pehle fire ho sakta hai
-    // aur token localStorage mein save nahi hoga (APK band karne par login chala jaata tha)
-    setPersistence(auth, browserLocalPersistence).then(() => {
+    // IndexedDB is more reliable than localStorage in TWA/WebView (survives storage clears).
+    // Falls back to localStorage if IndexedDB is unavailable (e.g. private browsing).
+    setPersistence(auth, indexedDBLocalPersistence).catch(() =>
+      setPersistence(auth, browserLocalPersistence)
+    ).then(() => {
       unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         // Cleanup previous profile listener on user change
         if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
