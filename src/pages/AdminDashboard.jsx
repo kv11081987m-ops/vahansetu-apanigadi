@@ -84,6 +84,7 @@ const AdminDashboard = () => {
   const [configSaving, setConfigSaving] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
   const [driverPrivateData, setDriverPrivateData] = useState({}); // driverId → { adminTempAccess }
+  const [referrals, setReferrals] = useState([]);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -150,12 +151,19 @@ const AdminDashboard = () => {
       if (snap.exists()) setPlatformConfig(prev => ({ ...prev, ...snap.data() }));
     });
 
+    // 6. Referrals Listener
+    const unsubReferrals = onSnapshot(
+      query(collection(db, 'referrals'), orderBy('createdAt', 'desc'), limit(100)),
+      (snap) => setReferrals(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+
     return () => {
       unsubDrivers();
       unsubUsers();
       unsubRides();
       unsubPayouts();
       unsubConfig();
+      unsubReferrals();
     };
   }, []);
 
@@ -555,6 +563,7 @@ const AdminDashboard = () => {
             { id: 'rides', label: 'Rides Feed', icon: Activity },
             { id: 'kyc', label: 'KYC Requests', icon: ShieldCheck },
             { id: 'payouts', label: 'Payouts', icon: IndianRupee },
+            { id: 'referrals', label: 'Referrals', icon: Gift },
             { id: 'commission', label: 'Commission', icon: Wallet },
             { id: 'reports', label: 'Reports', icon: BarChart2 },
             { id: 'generator', label: 'Link Generator', icon: Settings },
@@ -1703,6 +1712,80 @@ const AdminDashboard = () => {
             </div>
           </div>
         )}
+
+        {activeView === 'referrals' && (() => {
+          const rewarded = referrals.filter(r => r.status === 'rewarded');
+          const pending = referrals.filter(r => r.status === 'pending');
+          const totalPayout = rewarded.reduce((s, r) => s + (r.referrerReward || 0) + (r.refereeReward || 0), 0);
+          return (
+            <div className="space-y-6">
+              {/* Stats */}
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: 'Total Referrals', value: referrals.length, color: 'text-blue-400' },
+                  { label: 'Rewarded', value: rewarded.length, color: 'text-emerald-400' },
+                  { label: 'Pending', value: pending.length, color: 'text-amber-400' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="bg-[#1e293b] rounded-3xl p-6 border border-slate-800 text-center">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">{label}</p>
+                    <p className={`text-3xl font-black ${color}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-[#1e293b] rounded-3xl p-5 border border-slate-800 flex items-center justify-between">
+                <p className="text-sm font-black text-slate-400 uppercase tracking-widest">Total Credit Disbursed</p>
+                <p className="text-2xl font-black text-white">₹{totalPayout.toLocaleString('en-IN')}</p>
+              </div>
+
+              {/* Table */}
+              <div className="bg-[#1e293b] rounded-[2rem] border border-slate-800 overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-800">
+                  <h3 className="text-sm font-black text-white uppercase tracking-widest">Referral History</h3>
+                </div>
+                {referrals.length === 0 ? (
+                  <div className="text-center py-16">
+                    <Gift size={40} className="mx-auto text-slate-700 mb-3" />
+                    <p className="text-slate-500 font-bold">Abhi tak koi referral nahi</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-800">
+                    {referrals.map(ref => {
+                      const date = ref.createdAt?.toDate?.()?.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+                      const rewardDate = ref.rewardedAt?.toDate?.()?.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+                      return (
+                        <div key={ref.id} className="px-6 py-4 flex items-center justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-black text-white truncate">{ref.refereeName || 'User'}</span>
+                              <span className="text-[9px] font-black text-slate-500 bg-slate-800 px-2 py-0.5 rounded-full">{ref.refereeDisplayId}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-500">
+                              Referrer: <span className="text-slate-400 font-bold">{ref.referrerDisplayId}</span>
+                              {date && <span className="ml-2">• {date}</span>}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            {ref.status === 'rewarded' ? (
+                              <>
+                                <span className="text-[9px] font-black text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">Rewarded</span>
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  +₹{ref.referrerReward} / +₹{ref.refereeReward}
+                                  {rewardDate && <span className="ml-1">• {rewardDate}</span>}
+                                </p>
+                              </>
+                            ) : (
+                              <span className="text-[9px] font-black text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full">Pending</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {activeView === 'map' && (
           <div className="flex-1 bg-[#1e293b] rounded-[3rem] p-4 border border-slate-800 overflow-hidden relative">

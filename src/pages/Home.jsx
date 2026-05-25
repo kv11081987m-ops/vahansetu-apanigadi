@@ -90,6 +90,9 @@ const Home = () => {
   const [walletTxns, setWalletTxns] = useState(null); // null = not loaded yet
   const [myReferrals, setMyReferrals] = useState(null); // null = not loaded yet
   const [referralCopied, setReferralCopied] = useState(false);
+  const [notifications, setNotifications] = useState(null); // null = not loaded yet
+  const [savedPlaces, setSavedPlaces] = useState(null); // null = not loaded
+  const [savingPlace, setSavingPlace] = useState(false);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -119,6 +122,44 @@ const Home = () => {
       setMyReferrals(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }).catch(() => setMyReferrals([]));
   }, [activeSidebarModal, user, myReferrals]);
+
+  useEffect(() => {
+    if (activeSidebarModal !== 'notifications' || !user) return;
+    if (notifications !== null) return;
+    getDocs(
+      query(collection(db, 'notifications'), where('userId', '==', user.uid), limit(20))
+    ).then(snap => {
+      setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }).catch(() => setNotifications([]));
+  }, [activeSidebarModal, user, notifications]);
+
+  useEffect(() => {
+    if (activeSidebarModal !== 'places' || !user) return;
+    if (savedPlaces !== null) return;
+    setSavedPlaces(userProfile?.savedPlaces || []);
+  }, [activeSidebarModal, user, savedPlaces, userProfile?.savedPlaces]);
+
+  const handleSavePlace = async (name) => {
+    if (!pickup || !user) return;
+    setSavingPlace(true);
+    const newPlace = { name, address: pickup.address || pickupInput, lat: pickup.lat, lng: pickup.lng };
+    const updated = [...(savedPlaces || []).filter(p => p.name !== name), newPlace];
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { savedPlaces: updated });
+      setSavedPlaces(updated);
+      showToast(`"${name}" save ho gaya!`, 'success');
+    } catch { showToast('Save nahi ho saka.', 'error'); }
+    finally { setSavingPlace(false); }
+  };
+
+  const handleDeletePlace = async (name) => {
+    if (!user) return;
+    const updated = (savedPlaces || []).filter(p => p.name !== name);
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { savedPlaces: updated });
+      setSavedPlaces(updated);
+    } catch { showToast('Delete nahi ho saka.', 'error'); }
+  };
 
   const { drivers } = useLiveDrivers(service, isLoaded);
   // Drivers count for badge
@@ -1043,8 +1084,14 @@ const Home = () => {
           >
             <Navigation size={20} />
           </button>
-          <button className="w-11 h-11 bg-white rounded-2xl shadow-xl flex items-center justify-center text-slate-600 border border-slate-100 hover:bg-slate-50 transition-all">
+          <button
+            onClick={() => { setActiveSidebarModal('notifications'); setIsSidebarOpen(false); }}
+            className="w-11 h-11 bg-white rounded-2xl shadow-xl flex items-center justify-center text-slate-600 border border-slate-100 hover:bg-slate-50 transition-all relative"
+          >
             <Bell size={20} />
+            {notifications && notifications.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[8px] font-black text-white flex items-center justify-center">{notifications.length > 9 ? '9+' : notifications.length}</span>
+            )}
           </button>
           <button 
             onClick={logout}
@@ -1251,7 +1298,7 @@ const Home = () => {
                 <div className="h-px bg-slate-100 my-4" />
                 <SidebarLink icon={<Smartphone size={18} />} label="Support & Help" onClick={() => { setActiveSidebarModal('support'); setIsSidebarOpen(false); }} />
                 <SidebarLink icon={<AlertCircle size={18} />} label="Help & Grievance" onClick={() => { setActiveSidebarModal('grievance'); setIsSidebarOpen(false); }} />
-                <SidebarLink icon={<MapPin size={18} />} label="Saved Places" onClick={() => {}} />
+                <SidebarLink icon={<MapPin size={18} />} label="Saved Places" onClick={() => { setActiveSidebarModal('places'); setIsSidebarOpen(false); }} />
                 <div className="w-full flex items-center gap-4 p-4 rounded-2xl bg-slate-50/60 opacity-60 cursor-not-allowed">
                   <Smartphone size={18} className="text-slate-300" />
                   <div className="flex-1 flex items-center justify-between">
@@ -1507,6 +1554,113 @@ const Home = () => {
                         ))}
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {activeSidebarModal === 'notifications' && (
+                <div className="space-y-5 py-4">
+                  <div className="text-center">
+                    <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-[2rem] flex items-center justify-center mx-auto mb-4">
+                      <Bell size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-800">Notifications</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Latest updates</p>
+                  </div>
+
+                  {notifications === null ? (
+                    <div className="space-y-3">
+                      {[1,2,3].map(i => <div key={i} className="h-16 bg-slate-100 rounded-2xl animate-pulse" />)}
+                    </div>
+                  ) : notifications.length === 0 ? (
+                    <div className="text-center py-12 bg-slate-50 rounded-3xl border border-slate-100">
+                      <Bell size={36} className="mx-auto text-slate-200 mb-3" />
+                      <p className="text-sm font-black text-slate-400">Koi notification nahi</p>
+                      <p className="text-[10px] font-bold text-slate-300 mt-1">Ride complete karne ke baad yahan updates aayenge</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {notifications.map(n => {
+                        const date = n.createdAt?.toDate?.()?.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
+                        return (
+                          <div key={n.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-start gap-3">
+                            <div className="w-9 h-9 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center shrink-0">
+                              <Bell size={16} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-black text-slate-800 leading-snug">{n.title || 'Notification'}</p>
+                              {n.body && <p className="text-[10px] font-bold text-slate-500 mt-0.5 leading-snug">{n.body}</p>}
+                              {date && <p className="text-[9px] font-black text-slate-300 uppercase mt-1">{date}</p>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <p className="text-center text-[9px] font-black text-slate-300 uppercase tracking-[0.3em] py-2">— End —</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeSidebarModal === 'places' && (
+                <div className="space-y-5 py-4">
+                  <div className="text-center">
+                    <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center mx-auto mb-4">
+                      <MapPin size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-800">Saved Places</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Jaldi select karo — Home, Work</p>
+                  </div>
+
+                  {/* Saved places list */}
+                  <div className="space-y-3">
+                    {['Home', 'Work', 'Other'].map(name => {
+                      const place = (savedPlaces || []).find(p => p.name === name);
+                      return (
+                        <div key={name} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-sm font-black ${name === 'Home' ? 'bg-blue-100 text-blue-600' : name === 'Work' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500'}`}>
+                            {name === 'Home' ? '🏠' : name === 'Work' ? '💼' : '📍'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-black text-slate-700">{name}</p>
+                            {place ? (
+                              <p className="text-[10px] font-bold text-slate-400 truncate">{place.address}</p>
+                            ) : (
+                              <p className="text-[10px] font-bold text-slate-300">Abhi save nahi hai</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {place && (
+                              <button
+                                onClick={() => { setPickup({ lat: place.lat, lng: place.lng, address: place.address }); setPickupInput(place.address); setActiveSidebarModal(null); showToast(`${name} pickup set!`, 'success'); }}
+                                className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-lg active:scale-95 transition-all"
+                              >Use</button>
+                            )}
+                            {pickup && (
+                              <button
+                                onClick={() => handleSavePlace(name)}
+                                disabled={savingPlace}
+                                className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg active:scale-95 transition-all disabled:opacity-50"
+                              >{savingPlace ? '...' : 'Save'}</button>
+                            )}
+                            {place && (
+                              <button
+                                onClick={() => handleDeletePlace(name)}
+                                className="text-[9px] font-black text-red-400 bg-red-50 px-2 py-1 rounded-lg active:scale-95 transition-all"
+                              >Del</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Instructions */}
+                  <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                    <p className="text-[10px] font-bold text-blue-700 leading-relaxed text-center">
+                      Pehle map pe pickup set karo,<br />
+                      phir yahan "Save" karein.<br />
+                      Baad mein "Use" tap karo — seedha fill ho jaayega.
+                    </p>
                   </div>
                 </div>
               )}
@@ -1789,6 +1943,21 @@ const Home = () => {
           className="absolute left-4 right-4 z-[15]"
           style={{ top: '5.5rem' }}
         >
+          {/* Saved place quick-chips */}
+          {userProfile?.savedPlaces?.length > 0 && (
+            <div className="flex gap-2 mb-2 overflow-x-auto scrollbar-hide pb-1">
+              {userProfile.savedPlaces.map(place => (
+                <button
+                  key={place.name}
+                  onClick={() => { setPickup({ lat: place.lat, lng: place.lng, address: place.address }); setPickupInput(place.address); }}
+                  className="flex items-center gap-1.5 bg-white rounded-full px-3 py-1.5 text-[10px] font-black text-slate-700 shadow border border-slate-100 whitespace-nowrap active:scale-95 transition-all shrink-0"
+                >
+                  <span>{place.name === 'Home' ? '🏠' : place.name === 'Work' ? '💼' : '📍'}</span>
+                  {place.name}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden">
             <div className="flex items-center px-4 py-3.5 gap-3">
               <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
