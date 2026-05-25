@@ -145,6 +145,63 @@ exports.processScheduledRides = onSchedule(
 );
 
 /**
+ * Triggers when a ride_request is updated to 'accepted'.
+ * Sends FCM notification to the customer so they know a driver is on the way.
+ */
+exports.notifyCustomerOnAccept = onDocumentUpdated(
+  { document: 'ride_requests/{rideId}', region: 'asia-south1' },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+
+    if (before.status === after.status) return;
+    if (after.status !== 'accepted') return;
+
+    const userId = after.userId;
+    if (!userId) return;
+
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (!userDoc.exists) return;
+
+    const fcmToken = userDoc.data().fcmToken;
+    if (!fcmToken) return;
+
+    let driverName = 'Driver';
+    try {
+      const driverDoc = await db.collection('drivers').doc(after.driverId).get();
+      if (driverDoc.exists) driverName = driverDoc.data().name || 'Driver';
+    } catch (_) {}
+
+    try {
+      await getMessaging().send({
+        token: fcmToken,
+        notification: {
+          title: '🛺 Driver Mil Gaya!',
+          body: `${driverName} aapki ride le raha hai. OTP: ${after.otp}`
+        },
+        data: { rideId: event.params.rideId, type: 'ride_accepted' },
+        android: {
+          priority: 'high',
+          notification: { sound: 'default', channelId: 'ride_updates' }
+        },
+        apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+        webpush: {
+          headers: { Urgency: 'high' },
+          notification: { requireInteraction: true }
+        }
+      });
+      console.log(`[FCM] Customer ${userId} notified — ride accepted by ${driverName}`);
+    } catch (e) {
+      if (e.code === 'messaging/registration-token-not-registered') {
+        await db.collection('users').doc(userId).update({ fcmToken: null });
+      } else {
+        console.error('[FCM] Customer notify error:', e);
+      }
+    }
+  }
+);
+
+/**
  * Triggers when a ride_request is updated.
  * On first payment_done ride of a referred user, credits both referrer and referee.
  */

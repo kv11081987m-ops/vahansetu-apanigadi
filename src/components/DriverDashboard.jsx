@@ -616,6 +616,7 @@ const DriverDashboard = () => {
   const [isGrievanceOpen, setIsGrievanceOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [privateProfile, setPrivateProfile] = useState(null);
+  const [earningsFilter, setEarningsFilter] = useState('all'); // 'today' | 'week' | 'month' | 'all'
   const [locationError, setLocationError] = useState(null);
   const prevNewRequestIdRef = useRef(null);
   const profileLoadedRef = useRef(false);
@@ -799,7 +800,7 @@ const DriverDashboard = () => {
           collection(db, 'wallet_transactions'),
           where('driverId', '==', driverId),
           orderBy('createdAt', 'desc'),
-          limit(10)
+          limit(100)
         );
 
         const txSnap = await getDocs(txQuery);
@@ -1848,6 +1849,68 @@ const DriverDashboard = () => {
               </div>
             </div>
 
+            {/* Date Filter Tabs */}
+            {(() => {
+              const now = new Date();
+              const startOf = {
+                today: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+                week:  new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()),
+                month: new Date(now.getFullYear(), now.getMonth(), 1),
+                all:   new Date(0)
+              };
+              const filtered = walletTransactions.filter(tx => {
+                const ts = tx.createdAt?.toMillis?.() || 0;
+                return ts >= startOf[earningsFilter].getTime();
+              });
+              const filteredEarnings = filtered.reduce((sum, tx) => {
+                if (tx.type === 'commission_deducted') return sum + (tx.fareCollected || 0);
+                if (tx.type === 'online_earned' || tx.type === 'earned') return sum + (tx.fareCollected || 0);
+                return sum;
+              }, 0);
+              const filteredNet = filtered.reduce((sum, tx) => {
+                if (tx.type === 'commission_deducted') return sum + (tx.fareCollected || 0) - (tx.amount || 0);
+                if (tx.type === 'online_earned' || tx.type === 'earned') return sum + (tx.amount || 0);
+                return sum;
+              }, 0);
+              const FILTERS = [
+                { key: 'today', label: 'Aaj' },
+                { key: 'week',  label: 'Hafte' },
+                { key: 'month', label: 'Mahina' },
+                { key: 'all',   label: 'Sab' },
+              ];
+              return (
+                <>
+                  <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl">
+                    {FILTERS.map(f => (
+                      <button
+                        key={f.key}
+                        onClick={() => setEarningsFilter(f.key)}
+                        className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                          earningsFilter === f.key
+                            ? 'bg-white text-slate-800 shadow-sm'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  {earningsFilter !== 'all' && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                        <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-1">Kul Vasool</p>
+                        <p className="text-xl font-black text-blue-800">₹{filteredEarnings.toFixed(0)}</p>
+                      </div>
+                      <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
+                        <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1">Net Kamai</p>
+                        <p className="text-xl font-black text-emerald-800">₹{filteredNet.toFixed(0)}</p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+
             {/* Top Card: Wallet Balance */}
             <div className="bg-slate-900 rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
               <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/20 rounded-full blur-3xl" />
@@ -1883,9 +1946,18 @@ const DriverDashboard = () => {
 
             {/* Recent Transactions */}
             <div className="pt-4">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-2">Recent Transactions</h3>
+              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-2">Transactions</h3>
               <div className="space-y-3">
-                {walletTransactions.map(tx => {
+                {walletTransactions.filter(tx => {
+                  if (earningsFilter === 'all') return true;
+                  const now = new Date();
+                  const startOf = {
+                    today: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+                    week:  new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay()),
+                    month: new Date(now.getFullYear(), now.getMonth(), 1),
+                  };
+                  return (tx.createdAt?.toMillis?.() || 0) >= startOf[earningsFilter].getTime();
+                }).map(tx => {
                   const isCash = tx.type === 'commission_deducted';
                   const isOnline = tx.type === 'online_earned' || tx.type === 'earned';
                   const isWithdrawal = tx.type === 'withdrawn';

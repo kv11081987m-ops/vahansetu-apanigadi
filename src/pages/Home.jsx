@@ -41,6 +41,7 @@ import { calculateDistance } from '../utils/geoUtils';
 import { usePlatformConfig } from '../hooks/usePlatformConfig';
 import { computeFare } from '../utils/fareEngine';
 import { useRideHistory } from '../hooks/useRideHistory';
+import { useFCM } from '../hooks/useFCM';
 
 const containerStyle = { width: '100%', height: '100%' };
 const center = { lat: 26.502, lng: 83.778 }; // Deoria Focus
@@ -253,6 +254,13 @@ const Home = () => {
   const { rides: rideHistory, loading: historyLoading, formatDate, statusMeta } = useRideHistory(
     activeSidebarModal === 'history' && user ? { userId: user.uid } : {}
   );
+
+  // Customer FCM — saves token to users/{uid} so Cloud Function can notify on ride accept
+  useFCM(user?.uid || null, (payload) => {
+    const title = payload.notification?.title || '';
+    const body = payload.notification?.body || '';
+    showToast(body || title || 'Driver ne aapki ride accept kar li!', 'success');
+  }, 'users');
 
   const handleReset = useCallback(() => {
     setBookingStatus('idle');
