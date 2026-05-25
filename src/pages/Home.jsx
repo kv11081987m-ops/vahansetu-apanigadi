@@ -28,8 +28,7 @@ import {
   History,
   Bell
 } from 'lucide-react';
-import { QRCodeCanvas } from 'qrcode.react';
-import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -50,8 +49,6 @@ const mapOptions = {
 };
 
 const LIBRARIES = ['places', 'geometry'];
-
-const PLATFORM_UPI_ID = "soni3233@ybl";
 
 // Computed once at module load — used as constraints for datetime-local inputs
 const generateOtp = () => String(Math.floor(1000 + Math.random() * 9000));
@@ -798,23 +795,22 @@ const Home = () => {
       });
 
       const driverRef = doc(db, 'drivers', matchedDriver.id);
-      const driverSnap = await getDoc(driverRef);
-      if (driverSnap.exists()) {
-        const data = driverSnap.data();
-        const currentRating = data.rating || 0;
-        const currentCount = data.ratingCount || 0;
-        const newCount = currentCount + 1;
-        const newRating = ((currentRating * currentCount) + rating) / newCount;
-        
-        await updateDoc(driverRef, {
-          rating: Number(newRating.toFixed(1)),
-          ratingCount: newCount
-        });
-      }
+      const rideRef = doc(db, 'ride_requests', requestId);
 
-      await updateDoc(doc(db, 'ride_requests', requestId), { 
-        status: 'finished',
-        userRating: rating
+      await runTransaction(db, async (tx) => {
+        const driverSnap = await tx.get(driverRef);
+        if (driverSnap.exists()) {
+          const data = driverSnap.data();
+          const currentRating = data.rating || 0;
+          const currentCount = data.ratingCount || 0;
+          const newCount = currentCount + 1;
+          const newRating = ((currentRating * currentCount) + rating) / newCount;
+          tx.update(driverRef, {
+            rating: Number(newRating.toFixed(1)),
+            ratingCount: newCount
+          });
+        }
+        tx.update(rideRef, { status: 'finished', userRating: rating });
       });
 
       setShowRating(false);

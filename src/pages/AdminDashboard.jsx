@@ -75,6 +75,7 @@ const AdminDashboard = () => {
     maintenanceMessage: '',
     grievancePhone: '7529938896',
     grievanceEmail: 'apnigadivahansetu@gmail.com',
+    upiId: '',
   });
   const [configSaving, setConfigSaving] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
@@ -1487,6 +1488,33 @@ const AdminDashboard = () => {
                     placeholder="contact@example.com"
                     className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-blue-600 transition-all" />
                 </label>
+              </div>
+            </div>
+
+            {/* UPI ID for Online Payment */}
+            <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+              <h3 className="font-black text-white uppercase tracking-widest text-sm mb-2 flex items-center gap-3">
+                <IndianRupee size={18} className="text-emerald-400" /> Online Payment — UPI ID
+              </h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-5">Feature abhi Coming Soon hai — ID save karein future ke liye</p>
+              <div className="flex flex-col gap-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Platform UPI ID</span>
+                  <input type="text" value={platformConfig.upiId}
+                    onChange={e => setPlatformConfig(p => ({ ...p, upiId: e.target.value.trim() }))}
+                    placeholder="example@ybl"
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-emerald-500 transition-all font-mono tracking-wide" />
+                  <span className="text-[10px] text-slate-500">Jab online payment live hoga, yahi UPI ID QR code aur payment link mein use hoga</span>
+                </label>
+                {platformConfig.upiId ? (
+                  <div className="bg-slate-900/60 rounded-xl px-4 py-3 text-[11px] text-emerald-400 font-bold font-mono">
+                    ✓ UPI ID set: {platformConfig.upiId}
+                  </div>
+                ) : (
+                  <div className="bg-slate-900/60 rounded-xl px-4 py-3 text-[11px] text-slate-500 font-bold">
+                    ⚠ UPI ID abhi set nahi hai
+                  </div>
+                )}
               </div>
             </div>
 
