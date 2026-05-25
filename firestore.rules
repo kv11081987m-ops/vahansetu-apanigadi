@@ -1,0 +1,263 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ──────────────────────────────────────────────────────
+
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // NOTE: getRole() costs 1 Firestore read per rule evaluation.
+    // Replace with Custom Claims (Firebase Auth) when scaling up.
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isLoggedIn() && getRole() == 'admin';
+    }
+
+    function isDriver() {
+      return isLoggedIn() && getRole() == 'driver';
+    }
+
+    function isCustomer() {
+      return isLoggedIn() && getRole() == 'customer';
+    }
+
+    function changedFields() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+
+    // ── USERS ─────────────────────────────────────────────────────────────────
+    // Passenger reads own profile; admin reads all.
+    // KNOWN LIMITATION: referral bonus requires updating another user's `balance`
+    // field from the client. Migrate to a Cloud Function when possible.
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.role in ['customer', 'driver', 'new_user', 'admin'];
+
+      // Owner can update their own profile, but cannot change role/uid/displayId
+      allow update: if isOwner(userId)
+        && !changedFields().hasAny(['role', 'uid', 'displayId']);
+
+      // Referral bonus: any authenticated user can increment another user's balance
+      // (called in registerUser() when a referral code is used)
+      allow update: if isLoggedIn()
+        && changedFields().hasOnly(['balance']);
+
+      allow update: if isAdmin();
+    }
+
+
+    // ── DRIVERS ───────────────────────────────────────────────────────────────
+    // Public fields (name, phone, location, isOnline, vehicleType, rating) are
+    // readable by any logged-in user — needed for live-map and booking display.
+    // KNOWN LIMITATION: Firestore has no field-level read restrictions, so
+    // financial counters (walletBalance, totalEarnings) on this doc are visible
+    // to all logged-in users. adminTempAccess has been moved to private/data.
+    // TODO: Migrate financial fields to /drivers/{id}/private/data subcollection.
+    match /drivers/{driverId} {
+      allow read: if isLoggedIn();
+
+      allow create: if isOwner(driverId) || isAdmin();
+
+      // Driver updates own public profile (location, online status, earnings)
+      allow update: if isOwner(driverId);
+
+      // Passenger updates driver earnings + rating after payment/rating submit.
+      // Field-list restriction prevents arbitrary value manipulation.
+      allow update: if isCustomer()
+        && changedFields().hasOnly([
+             'walletBalance', 'totalEarnings', 'totalRides',
+             'rating', 'ratingCount'
+           ]);
+
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+
+      // ── DRIVER PRIVATE DATA ────────────────────────────────────────────────
+      // KYC documents, UPI ID, Aadhar — only driver and admin can access.
+      match /private/{doc} {
+        allow read, write: if isOwner(driverId) || isAdmin();
+      }
+    }
+
+
+    // ── RIDE REQUESTS ─────────────────────────────────────────────────────────
+    match /ride_requests/{rideId} {
+
+      // Passenger sees own rides; driver sees own + broadcast rides; admin sees all.
+      allow read: if isLoggedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        resource.data.driverId == 'broadcast' ||
+        isAdmin()
+      );
+
+      // Only a customer can create, and only for themselves
+      allow create: if isCustomer()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status in ['pending', 'scheduled'];
+
+      // Passenger can update payment, rating, SOS, and cancellation fields only
+      allow update: if isCustomer()
+        && resource.data.userId == request.auth.uid
+        && changedFields().hasOnly([
+             'status', 'paymentStatus', 'paymentMethod',
+             'fareAmount', 'razorpayPaymentId', 'userRating',
+             'emergencyTriggeredBy', 'emergencyTime',
+             'cancellationReason', 'cancelledBy'
+           ])
+        // Restrict status to valid customer-settable values only
+        && (!changedFields().hasAny(['status']) || request.resource.data.status in ['cancelled', 'emergency', 'payment_done', 'finished']);
+
+      // Driver can accept broadcast rides and update ride-lifecycle fields only
+      allow update: if isDriver()
+        && (
+          resource.data.driverId == request.auth.uid ||
+          resource.data.driverId == 'broadcast'
+        )
+        && changedFields().hasOnly([
+             'status', 'driverId', 'driverName',
+             'startedAt', 'paidAt', 'cancelledReason', 'cancelledBy', 'waitingSeconds',
+             'fareAmount', 'paymentMethod', 'paymentStatus', 'rejectedBy'
+           ]);
+
+      allow read, write: if isAdmin();
+    }
+
+
+    // ── BOOKINGS ──────────────────────────────────────────────────────────────
+    match /bookings/{bookingId} {
+      allow read: if isLoggedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isCustomer()
+        && request.resource.data.userId == request.auth.uid;
+
+      // Passenger can only cancel their own booking
+      allow update: if isCustomer()
+        && resource.data.userId == request.auth.uid
+        && changedFields().hasOnly(['status']);
+
+      allow update: if isAdmin();
+    }
+
+
+    // ── TRANSACTIONS ──────────────────────────────────────────────────────────
+    match /transactions/{txId} {
+      allow read: if isLoggedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+
+      // Created by passenger after payment — must reference own userId
+      allow create: if isLoggedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+
+    // ── RATINGS ───────────────────────────────────────────────────────────────
+    match /ratings/{ratingId} {
+      allow read: if isLoggedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow create: if isCustomer()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update, delete: if isAdmin();
+    }
+
+
+    // ── WALLET TRANSACTIONS ───────────────────────────────────────────────────
+    match /wallet_transactions/{txId} {
+      allow read: if isLoggedIn() && (
+        resource.data.driverId == request.auth.uid || isAdmin()
+      );
+
+      // Only the owner driver or admin can create wallet transaction records
+      allow create: if isLoggedIn() && (
+        request.resource.data.driverId == request.auth.uid || isAdmin()
+      );
+      allow update, delete: if isAdmin();
+    }
+
+
+    // ── WITHDRAWAL REQUESTS ───────────────────────────────────────────────────
+    match /withdrawal_requests/{reqId} {
+      allow read: if isLoggedIn() && (
+        resource.data.driverId == request.auth.uid || isAdmin()
+      );
+
+      allow create: if isDriver()
+        && request.resource.data.driverId == request.auth.uid;
+
+      // Only admin approves/rejects
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+
+    // ── SYSTEM BROADCASTS ─────────────────────────────────────────────────────
+    match /system_broadcasts/{msgId} {
+      allow read: if isLoggedIn();
+      allow write: if isAdmin();
+    }
+
+
+    // ── PLATFORM CONFIG ───────────────────────────────────────────────────────
+    // Admin writes platform settings; app can read to apply fare/config rules.
+    match /config/{docId} {
+      allow read: if isLoggedIn();
+      allow write: if isAdmin();
+    }
+
+
+    // ── ID LOOKUP ─────────────────────────────────────────────────────────────
+    // Public mapping: displayId → phone number, used for pre-auth VS-ID login.
+    // Only contains phone — no other PII. Readable without auth intentionally.
+    match /id_lookup/{displayId} {
+      allow read: if true;
+      allow create: if isLoggedIn()
+        && request.resource.data.keys().hasOnly(['phone']);
+      allow update, delete: if isAdmin();
+    }
+
+
+    // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+    match /notifications/{notifId} {
+      allow read: if isLoggedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow create: if isLoggedIn();
+
+      // Only the recipient or admin can mark as read/update
+      allow update: if isLoggedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow delete: if isAdmin();
+    }
+
+  }
+}

@@ -30,7 +30,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
 import { QRCodeCanvas } from 'qrcode.react';
 import { db } from '../services/firebase';
-import { collection, query, onSnapshot, orderBy, limit, doc, updateDoc, addDoc, serverTimestamp, increment, setDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, limit, doc, updateDoc, addDoc, serverTimestamp, increment, setDoc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 
 const AdminDashboard = () => {
@@ -78,6 +78,7 @@ const AdminDashboard = () => {
   });
   const [configSaving, setConfigSaving] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
+  const [driverPrivateData, setDriverPrivateData] = useState({}); // driverId → { adminTempAccess }
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -90,6 +91,24 @@ const AdminDashboard = () => {
       const driversData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setDrivers(driversData);
       setStats(prev => ({ ...prev, totalDrivers: driversData.length }));
+
+      // Fetch adminTempAccess from private subcollection for restricted drivers
+      const restrictedIds = driversData.filter(d => (d.walletBalance || 0) < -50).map(d => d.id);
+      if (restrictedIds.length > 0) {
+        Promise.all(
+          restrictedIds.map(id =>
+            getDoc(doc(db, 'drivers', id, 'private', 'data'))
+              .then(snap => ({ id, adminTempAccess: snap.exists() ? (snap.data().adminTempAccess ?? false) : false }))
+              .catch(() => ({ id, adminTempAccess: false }))
+          )
+        ).then(results => {
+          setDriverPrivateData(prev => {
+            const updated = { ...prev };
+            results.forEach(r => { updated[r.id] = { adminTempAccess: r.adminTempAccess }; });
+            return updated;
+          });
+        });
+      }
     });
 
     // 2. Users Count
@@ -153,7 +172,7 @@ const AdminDashboard = () => {
     const [val, setVal] = React.useState(currentUpi || '');
     const save = async () => {
       if (!val.trim()) return;
-      await updateDoc(doc(db, 'drivers', driverId), { upiId: val.trim() });
+      await setDoc(doc(db, 'drivers', driverId, 'private', 'data'), { upiId: val.trim() }, { merge: true });
       setEditing(false);
     };
     if (editing) return (
@@ -264,12 +283,14 @@ const AdminDashboard = () => {
   };
 
   const handleGrantTempAccess = async (driverId) => {
-    await updateDoc(doc(db, 'drivers', driverId), { adminTempAccess: true });
+    await setDoc(doc(db, 'drivers', driverId, 'private', 'data'), { adminTempAccess: true }, { merge: true });
+    setDriverPrivateData(prev => ({ ...prev, [driverId]: { adminTempAccess: true } }));
     alert("Temp access granted!");
   };
 
   const handleRevokeTempAccess = async (driverId) => {
-    await updateDoc(doc(db, 'drivers', driverId), { adminTempAccess: false });
+    await setDoc(doc(db, 'drivers', driverId, 'private', 'data'), { adminTempAccess: false }, { merge: true });
+    setDriverPrivateData(prev => ({ ...prev, [driverId]: { adminTempAccess: false } }));
     alert("Temp access revoked.");
   };
 
@@ -930,7 +951,7 @@ const AdminDashboard = () => {
                               <p className="text-[10px] text-orange-400/60 font-bold">Restricted</p>
                             </td>
                             <td className="py-4 px-4">
-                              {driver.adminTempAccess ? (
+                              {driverPrivateData[driver.id]?.adminTempAccess ? (
                                 <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-lg text-[10px] font-black uppercase">Granted</span>
                               ) : (
                                 <span className="px-3 py-1 bg-slate-700 text-slate-400 rounded-lg text-[10px] font-black uppercase">None</span>
@@ -954,7 +975,7 @@ const AdminDashboard = () => {
                               </div>
                             </td>
                             <td className="py-4 px-4 text-right">
-                              {driver.adminTempAccess ? (
+                              {driverPrivateData[driver.id]?.adminTempAccess ? (
                                 <button onClick={() => handleRevokeTempAccess(driver.id)} className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500/20 transition-all ml-auto">
                                   <Lock size={12} /> Revoke
                                 </button>

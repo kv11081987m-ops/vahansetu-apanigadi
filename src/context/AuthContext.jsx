@@ -3,6 +3,9 @@ import {
   onAuthStateChanged,
   RecaptchaVerifier,
   signInWithPhoneNumber,
+  signInWithEmailAndPassword,
+  linkWithCredential,
+  EmailAuthProvider,
   signOut,
   setPersistence,
   browserLocalPersistence
@@ -24,6 +27,8 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [sessionConsentPending, setSessionConsentPending] = useState(null); // null | 'driver' | 'passenger'
   const sessionUnsubRef = useRef(null);
+  const profileUnsubRef = useRef(null); // live profile listener cleanup
+  const sessionCheckedRef = useRef(false); // session check sirf ek baar
 
   const startSessionWatcher = useCallback((uid, currentSid) => {
     if (sessionUnsubRef.current) sessionUnsubRef.current();
@@ -106,8 +111,6 @@ export const AuthProvider = ({ children }) => {
       auth.settings.appVerificationDisabledForTesting = true;
     }
 
-    setPersistence(auth, browserLocalPersistence);
-
     // APK/WebView mein localStorage kabhi kabhi clear ho jaata hai — sessionStorage backup
     const storedSid = localStorage.getItem('vs_session_id');
     if (storedSid) {
@@ -119,41 +122,76 @@ export const AuthProvider = ({ children }) => {
       }
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-        if (userDoc.exists()) {
-          const profile = userDoc.data();
-          setUserProfile(profile);
-          if (profile.role !== 'admin' && profile.role !== 'new_user') {
-            handleSessionCheck(currentUser.uid, profile);
-          }
+    let unsubscribe = () => {};
+
+    // setPersistence await karna zaroori hai — warna onAuthStateChanged pehle fire ho sakta hai
+    // aur token localStorage mein save nahi hoga (APK band karne par login chala jaata tha)
+    setPersistence(auth, browserLocalPersistence).then(() => {
+      unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+        // Cleanup previous profile listener on user change
+        if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
+
+        if (currentUser) {
+          setUser(currentUser);
+          sessionCheckedRef.current = false;
+
+          // onSnapshot — userProfile balance aur data live update hoga
+          profileUnsubRef.current = onSnapshot(
+            doc(db, 'users', currentUser.uid),
+            (userDoc) => {
+              if (userDoc.exists()) {
+                const profile = userDoc.data();
+                setUserProfile(profile);
+                // Session check sirf pehli baar karo (login pe), har update pe nahi
+                if (!sessionCheckedRef.current && profile.role !== 'admin' && profile.role !== 'new_user') {
+                  sessionCheckedRef.current = true;
+                  handleSessionCheck(currentUser.uid, profile);
+                }
+              } else {
+                setUserProfile({ role: 'new_user' });
+              }
+              setLoading(false);
+            },
+            (e) => {
+              console.error('[AuthContext] profile listener error:', e);
+              setUserProfile({ role: 'new_user' });
+              setLoading(false);
+            }
+          );
         } else {
-          setUserProfile({ role: 'new_user' });
+          setUser(null);
+          setUserProfile(null);
+          setSessionConsentPending(null);
+          sessionCheckedRef.current = false;
+          if (sessionUnsubRef.current) { sessionUnsubRef.current(); sessionUnsubRef.current = null; }
+          setLoading(false);
         }
-      } else {
-        setUser(null);
-        setUserProfile(null);
-        setSessionConsentPending(null);
-        if (sessionUnsubRef.current) { sessionUnsubRef.current(); sessionUnsubRef.current = null; }
-      }
+      });
+    }).catch((e) => {
+      console.error('[AuthContext] setPersistence error:', e);
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (profileUnsubRef.current) { profileUnsubRef.current(); profileUnsubRef.current = null; }
+    };
   }, [handleSessionCheck]);
 
-  // Setup reCAPTCHA
+  // Setup reCAPTCHA — always clears the old verifier first so expired tokens
+  // don't block subsequent OTP requests (common in TWA/APK after failed attempts)
   const setupRecaptcha = (containerId) => {
-    if (window.recaptchaVerifier) return;
+    if (window.recaptchaVerifier) {
+      try { window.recaptchaVerifier.clear(); } catch (_) {}
+      window.recaptchaVerifier = null;
+    }
     window.recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
       'size': 'invisible',
       'callback': () => {}
     });
   };
 
-  // Sign in with Phone
+  // Sign in with Phone (OTP)
   const signInPhone = async (phoneNumber) => {
     try {
       const verifier = window.recaptchaVerifier;
@@ -163,6 +201,27 @@ export const AuthProvider = ({ children }) => {
       console.error("Phone sign-in error:", error);
       throw error;
     }
+  };
+
+  // Sign in with Password (Email+Password linked to phone account)
+  const signInWithPassword = async (identifier, password) => {
+    const trimmed = identifier.trim();
+    let phoneDigits;
+
+    if (/^\d{10}$/.test(trimmed)) {
+      phoneDigits = `91${trimmed}`;
+    } else if (trimmed.startsWith('+91')) {
+      phoneDigits = trimmed.replace(/\D/g, '');
+    } else if (trimmed.toUpperCase().startsWith('VS-')) {
+      const idSnap = await getDoc(doc(db, 'id_lookup', trimmed.toUpperCase()));
+      if (!idSnap.exists()) throw new Error('VS-ID nahi mila. Mobile number use karein.');
+      phoneDigits = idSnap.data().phone.replace(/\D/g, '');
+    } else {
+      throw new Error('Valid mobile number (10 digit) ya VS-ID darj karein.');
+    }
+
+    const email = `${phoneDigits}@vahansetu.in`;
+    return signInWithEmailAndPassword(auth, email, password);
   };
 
   // Complete Registration / Update Profile
@@ -190,6 +249,28 @@ export const AuthProvider = ({ children }) => {
       ...safeData
     };
     await setDoc(doc(db, 'users', uid), profile);
+
+    // Public displayId → phone mapping for pre-auth VS-ID lookup
+    try {
+      await setDoc(doc(db, 'id_lookup', profile.displayId), {
+        phone: auth.currentUser.phoneNumber
+      });
+    } catch (e) {
+      console.error('[registerUser] id_lookup error:', e);
+    }
+
+    // Link email+password credential if password was provided during registration
+    if (data.password) {
+      try {
+        const phoneDigits = auth.currentUser.phoneNumber.replace(/\D/g, '');
+        const email = `${phoneDigits}@vahansetu.in`;
+        const credential = EmailAuthProvider.credential(email, data.password);
+        await linkWithCredential(auth.currentUser, credential);
+      } catch (e) {
+        console.error('[registerUser] password link error:', e);
+        // Non-critical — OTP login still works
+      }
+    }
 
     if (data.referredBy) {
       const q = query(collection(db, 'users'), where('displayId', '==', data.referredBy));
@@ -240,6 +321,7 @@ export const AuthProvider = ({ children }) => {
     loading,
     setupRecaptcha,
     signInPhone,
+    signInWithPassword,
     registerUser,
     logout,
     isAdmin: userProfile?.role === 'admin',

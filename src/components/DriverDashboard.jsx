@@ -54,6 +54,7 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
   });
   const [map, setMap] = useState(null);
   const [routePath, setRoutePath] = useState([]);
+  const [altRoutePaths, setAltRoutePaths] = useState([]);
   const [routeColor, setRouteColor] = useState('#4A90D9');
   const [routeInfo, setRouteInfo] = useState(null); // { duration, distance, arrivalTime }
   const [routeTick, setRouteTick] = useState(0);
@@ -105,6 +106,7 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
           origin: { lat: Number(origin.lat), lng: Number(origin.lng) },
           destination: { lat: Number(dest.lat), lng: Number(dest.lng) },
           travelMode: window.google.maps.TravelMode.DRIVING,
+          provideRouteAlternatives: true,
         },
         (result, status) => {
           if (status === window.google.maps.DirectionsStatus.OK) {
@@ -114,6 +116,9 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
               .toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
             setRoutePath(path);
+            setAltRoutePaths(
+              result.routes.slice(1).map(r => r.overview_path.map(p => ({ lat: p.lat(), lng: p.lng() })))
+            );
             setRouteColor(color);
             setRouteInfo({ duration: leg.duration.text, distance: leg.distance.text, arrivalTime });
 
@@ -125,9 +130,14 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
       );
     } else {
       setRoutePath([]);
+      setAltRoutePaths([]);
       setRouteInfo(null);
     }
-  }, [isLoaded, newRequest, driverGpsLocation, profileLocation, map, routeTick]);
+  // driverGpsLocation/profileLocation intentionally excluded — routeTick (15s) reads
+  // the latest position at fire time; including GPS deps caused a DirectionsService
+  // call on every watchPosition update (~6-12x/min), which is expensive and unnecessary.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, newRequest, map, routeTick]);
 
   if (!isLoaded) return <div className="w-full h-full bg-slate-100 animate-pulse" />;
 
@@ -143,10 +153,17 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
           styles: [{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }]
         }}
       >
+        {altRoutePaths.map((path, i) => (
+          <Polyline
+            key={`alt-${i}`}
+            path={path}
+            options={{ strokeColor: '#94a3b8', strokeOpacity: 0.5, strokeWeight: 5, lineCap: 'round', zIndex: 0 }}
+          />
+        ))}
         {routePath.length > 0 && (
           <Polyline
             path={routePath}
-            options={{ strokeColor: routeColor, strokeOpacity: 0.9, strokeWeight: 6, lineCap: 'round' }}
+            options={{ strokeColor: routeColor, strokeOpacity: 0.9, strokeWeight: 6, lineCap: 'round', zIndex: 1 }}
           />
         )}
         {(driverGpsLocation || profileLocation) && (
@@ -367,16 +384,22 @@ const KycForm = ({ driverId, isUploading, setIsUploading }) => {
         ...(aadharPhotoUrl && { aadharPhotoUrl }),
       };
 
+      // Public doc — only non-sensitive fields
       await updateDoc(doc(db, 'drivers', driverId), {
-        kycData,
-        kyc_documents,
-        upiId: formData.get('upiId'),
-        policeVerificationDeadline,
         verificationStatus: 'pending',
         rcNumber: formData.get('rcNumber'),
         insuranceExpiry: formData.get('insuranceExpiry'),
         pucExpiry: formData.get('pucExpiry'),
       });
+
+      // Private subcollection — KYC docs, UPI ID, Aadhar (passengers cannot read)
+      await setDoc(doc(db, 'drivers', driverId, 'private', 'data'), {
+        kycData,
+        kyc_documents,
+        upiId: formData.get('upiId'),
+        policeVerificationDeadline,
+      }, { merge: true });
+
       alert('KYC Submit ho gaya! Admin 12-24 ghante mein verify karega.');
     } catch (err) {
       console.error(err);
@@ -524,6 +547,7 @@ const DriverDashboard = () => {
   const [isGrievanceOpen, setIsGrievanceOpen] = useState(false);
   const [grievancePhone, setGrievancePhone] = useState('7529938896');
   const [toast, setToast] = useState(null);
+  const [privateProfile, setPrivateProfile] = useState(null);
   const [locationError, setLocationError] = useState(null);
   const prevNewRequestIdRef = useRef(null);
   const profileLoadedRef = useRef(false);
@@ -592,6 +616,7 @@ const DriverDashboard = () => {
 
         await updateDoc(doc(db, 'drivers', driverId), {
           location: { lat: latitude, lng: longitude },
+          heading: heading != null && !isNaN(heading) ? heading : 0,
           lastLocationUpdate: serverTimestamp()
         });
 
@@ -616,7 +641,10 @@ const DriverDashboard = () => {
           }
         }
       },
-      (err) => console.error("Location Error:", err),
+      (err) => {
+        console.error("Location Error:", err);
+        setLocationError('GPS error: Location update band ho gayi. Dobara try karein.');
+      },
       { enableHighAccuracy: true, maximumAge: 5000 }
     );
 
@@ -688,10 +716,19 @@ const DriverDashboard = () => {
     return () => unsub();
   }, [driverId]);
 
-  // Pre-fill UPI ID from profile when available
+  // Listen to private subcollection — KYC data, UPI ID, policeVerificationDeadline
   useEffect(() => {
-    if (profile?.upiId) setUpiId(profile.upiId);
-  }, [profile?.upiId]);
+    if (!driverId) return;
+    const unsub = onSnapshot(doc(db, 'drivers', driverId, 'private', 'data'), (snap) => {
+      if (snap.exists()) setPrivateProfile(snap.data());
+    });
+    return () => unsub();
+  }, [driverId]);
+
+  // Pre-fill UPI ID from private profile when available
+  useEffect(() => {
+    if (privateProfile?.upiId) setUpiId(privateProfile.upiId);
+  }, [privateProfile?.upiId]);
 
   useEffect(() => {
     if (!driverId) return;
@@ -815,25 +852,31 @@ const DriverDashboard = () => {
       .catch(err => console.error('Pending payment restore error:', err));
   }, [driverId]);
 
-  // On-mount recovery: restore active ride after page refresh without needing a composite index
+  // On-mount recovery: restore active ride after page refresh.
+  // Single equality filter only — avoids composite index requirement.
+  // Status filter done client-side to prevent Firestore index error.
   useEffect(() => {
     if (!driverId) return;
     const recover = async () => {
       if (newRequestRef.current) return;
       try {
-        // No orderBy here — avoids composite index requirement; sort client-side instead
         const q = query(
           collection(db, 'ride_requests'),
-          where('driverId', '==', driverId),
-          where('status', 'in', ['accepted', 'started', 'completed', 'payment_done'])
+          where('driverId', '==', driverId)
         );
         const snap = await getDocs(q);
         if (!snap.empty && !newRequestRef.current) {
-          const rides = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const activeStatuses = ['accepted', 'started', 'completed', 'payment_done'];
+          const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+          const rides = snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(d => activeStatuses.includes(d.status) && (d.createdAt?.toMillis?.() || 0) >= twelveHoursAgo);
           rides.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
           const ride = rides[0];
-          newRequestRef.current = ride;
-          setNewRequest(ride);
+          if (ride) {
+            newRequestRef.current = ride;
+            setNewRequest(ride);
+          }
         }
       } catch (err) {
         console.error('Active ride recovery error:', err);
@@ -878,7 +921,7 @@ const DriverDashboard = () => {
   const walletZone = walletBalance >= -50 ? 'normal'
     : walletBalance >= -100 ? 'restricted'
     : 'blocked';
-  const canAcceptRide = walletZone === 'normal' || (walletZone === 'restricted' && profile?.adminTempAccess === true);
+  const canAcceptRide = walletZone === 'normal' || (walletZone === 'restricted' && privateProfile?.adminTempAccess === true);
 
   const handleAcceptRide = async () => {
     if (!newRequest || !driverId) return;
@@ -990,18 +1033,28 @@ const DriverDashboard = () => {
     const finalFare = fareBreakup.total;
     const commission = Math.round(finalFare * ((config.commissionPercent || 8) / 100));
     try {
-      await updateDoc(doc(db, 'ride_requests', ride.id), {
-        status: 'payment_done',
-        paymentMethod: 'cash',
-        paymentStatus: 'completed',
-        fareAmount: finalFare,
-        paidAt: serverTimestamp(),
-      });
-      await updateDoc(doc(db, 'drivers', driverId), {
-        walletBalance: increment(-commission),
-        totalEarnings: increment(finalFare),
-        cashEarnings: increment(finalFare),
-        totalRides: increment(1),
+      // Transaction ensures idempotency — agar passenger ne pehle confirm kar diya ho
+      // toh driver ka double-deduction nahi hoga
+      await runTransaction(db, async (txn) => {
+        const rideRef = doc(db, 'ride_requests', ride.id);
+        const rideSnap = await txn.get(rideRef);
+        if (!rideSnap.exists()) throw new Error('Ride not found');
+        if (rideSnap.data().status === 'payment_done' || rideSnap.data().status === 'paid') {
+          throw new Error('already_paid');
+        }
+        txn.update(rideRef, {
+          status: 'payment_done',
+          paymentMethod: 'cash',
+          paymentStatus: 'completed',
+          fareAmount: finalFare,
+          paidAt: serverTimestamp(),
+        });
+        txn.update(doc(db, 'drivers', driverId), {
+          walletBalance: increment(-commission),
+          totalEarnings: increment(finalFare),
+          cashEarnings: increment(finalFare),
+          totalRides: increment(1),
+        });
       });
       await addDoc(collection(db, 'wallet_transactions'), {
         driverId,
@@ -1016,8 +1069,14 @@ const DriverDashboard = () => {
       localStorage.removeItem('pendingPaymentRideId');
       setPendingPaymentRide(null);
     } catch (err) {
-      console.error('Cash collection error:', err);
-      showToast('Error aaya. Dobara try karein.', 'error');
+      if (err?.message === 'already_paid') {
+        // Passenger ne pehle hi confirm kar diya — silently clear
+        localStorage.removeItem('pendingPaymentRideId');
+        setPendingPaymentRide(null);
+      } else {
+        console.error('Cash collection error:', err);
+        showToast('Error aaya. Dobara try karein.', 'error');
+      }
     }
   };
 
@@ -1027,32 +1086,39 @@ const DriverDashboard = () => {
     if (!amount || amount < 50) {
       return alert("Minimum withdrawal amount is ₹50.");
     }
-    if (amount > (stats.walletBalance || 0)) {
-      return alert("Amount exceeds available wallet balance.");
-    }
     if (!upiId) return alert("Please enter a valid UPI ID.");
-    
-    try {
-      await addDoc(collection(db, 'withdrawal_requests'), {
-        driverId: driverId,
-        driverName: profile?.name || 'Driver',
-        amount: Number(withdrawAmount),
-        upiId: upiId,
-        status: 'pending',
-        createdAt: serverTimestamp()
-      });
-      
-      await addDoc(collection(db, 'wallet_transactions'), {
-        driverId,
-        amount,
-        type: 'withdrawn',
-        status: 'pending',
-        createdAt: serverTimestamp(),
-        note: `Withdrawal to ${upiId}`
-      });
 
-      await updateDoc(doc(db, 'drivers', driverId), {
-        walletBalance: increment(-amount)
+    try {
+      const driverRef = doc(db, 'drivers', driverId);
+      const withdrawalRef = doc(collection(db, 'withdrawal_requests'));
+      const walletTxRef = doc(collection(db, 'wallet_transactions'));
+
+      await runTransaction(db, async (transaction) => {
+        const driverSnap = await transaction.get(driverRef);
+        if (!driverSnap.exists()) throw new Error("Driver record nahi mila.");
+
+        const currentBalance = driverSnap.data().walletBalance || 0;
+        if (amount > currentBalance) {
+          throw new Error("Wallet mein itna balance nahi hai.");
+        }
+
+        transaction.update(driverRef, { walletBalance: increment(-amount) });
+        transaction.set(withdrawalRef, {
+          driverId,
+          driverName: profile?.name || 'Driver',
+          amount,
+          upiId,
+          status: 'pending',
+          createdAt: serverTimestamp()
+        });
+        transaction.set(walletTxRef, {
+          driverId,
+          amount,
+          type: 'withdrawn',
+          status: 'pending',
+          createdAt: serverTimestamp(),
+          note: `Withdrawal to ${upiId}`
+        });
       });
 
       alert("Request Sent!");
@@ -1264,7 +1330,7 @@ const DriverDashboard = () => {
 
       {/* Police Verification Countdown Banner */}
       {(() => {
-        const deadline = profile?.policeVerificationDeadline;
+        const deadline = privateProfile?.policeVerificationDeadline || profile?.policeVerificationDeadline;
         if (!deadline) return null;
         const deadlineMs = deadline?.toMillis ? deadline.toMillis() : new Date(deadline).getTime();
         const daysLeft = Math.ceil((deadlineMs - Date.now()) / (1000 * 60 * 60 * 24));
@@ -1555,6 +1621,13 @@ const DriverDashboard = () => {
                             <span>Total</span><span>₹{driverFareBreakup.total}</span>
                           </div>
                         </div>
+                        {/* Online Payment — Coming Soon */}
+                        <div className="w-full flex flex-col items-center gap-1 bg-slate-100 rounded-xl px-4 py-3.5 border border-slate-200">
+                          <Clock size={18} className="text-slate-400" />
+                          <p className="text-[10px] font-black text-slate-500">Online Payment</p>
+                          <p className="text-[11px] font-black text-slate-700">Jaldi Aa Raha Hai!</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Coming Soon</p>
+                        </div>
                         <button
                           onClick={() => handleCashCollected(newRequest, driverFareBreakup)}
                           className="w-full py-3.5 bg-emerald-600 text-white rounded-xl font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
@@ -1614,6 +1687,13 @@ const DriverDashboard = () => {
               <div className="flex justify-between font-black text-slate-800 text-sm border-t border-slate-100 pt-2">
                 <span>Total</span><span>₹{pendingFareBreakup.total}</span>
               </div>
+            </div>
+            {/* Online Payment — Coming Soon */}
+            <div className="w-full flex flex-col items-center gap-1 bg-slate-100 rounded-xl px-4 py-3.5 border border-slate-200">
+              <Clock size={18} className="text-slate-400" />
+              <p className="text-[10px] font-black text-slate-500">Online Payment</p>
+              <p className="text-[11px] font-black text-slate-700">Jaldi Aa Raha Hai!</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Coming Soon</p>
             </div>
             <button
               onClick={() => handleCashCollected(pendingPaymentRide, pendingFareBreakup)}

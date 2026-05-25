@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
@@ -27,20 +27,54 @@ const AdminRoute = ({ children }) => {
     </div>
   );
   if (!user) return <Navigate to="/" />;
-  if (userProfile && userProfile.role !== 'admin') return <Navigate to="/" />;
+  // null check zaroori hai — profile fetch fail ho toh render mat karo
+  if (!userProfile || userProfile.role !== 'admin') return <Navigate to="/" />;
   return children;
 };
 
 const App = () => {
   const { user, userProfile, loading } = useAuth();
+  const [showExitToast, setShowExitToast] = useState(false);
 
   useEffect(() => {
-    window.history.pushState(null, '', window.location.href);
-    const handlePopState = () => {
-      window.history.pushState(null, '', window.location.href);
+    let canExit = false;
+    let exitTimer = null;
+
+    // Sentinel entry — gives WebView one history level before closing
+    window.history.pushState({ twa: true }, '', window.location.href);
+
+    const handlePopState = (e) => {
+      // capture: true fires BEFORE React Router's bubble-phase listener.
+      // stopImmediatePropagation prevents React Router from ever seeing this
+      // popstate — so it never navigates to the login page on back press.
+      e.stopImmediatePropagation();
+
+      if (canExit) {
+        // Second back press within 2 s — hand control back to browser/TWA to close
+        clearTimeout(exitTimer);
+        setShowExitToast(false);
+        window.removeEventListener('popstate', handlePopState, { capture: true });
+        window.history.back();
+        return;
+      }
+
+      // Stay on current page
+      window.history.pushState({ twa: true }, '', window.location.href);
+
+      // Show "press again to exit" hint
+      canExit = true;
+      setShowExitToast(true);
+      exitTimer = setTimeout(() => {
+        canExit = false;
+        setShowExitToast(false);
+      }, 2000);
     };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+
+    window.addEventListener('popstate', handlePopState, { capture: true });
+    return () => {
+      window.removeEventListener('popstate', handlePopState, { capture: true });
+      if (exitTimer) clearTimeout(exitTimer);
+    };
   }, []);
 
   if (loading) return (
@@ -64,21 +98,21 @@ const App = () => {
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
-        <Route 
-          path="/home" 
+        <Route
+          path="/home"
           element={
             <ProtectedRoute>
               <Home />
             </ProtectedRoute>
-          } 
+          }
         />
-        <Route 
-          path="/dashboard" 
+        <Route
+          path="/dashboard"
           element={
             <ProtectedRoute>
               <Dashboard />
             </ProtectedRoute>
-          } 
+          }
         />
         <Route
           path="/admin"
@@ -94,6 +128,15 @@ const App = () => {
         <Route path="*" element={user && homePath ? <Navigate to={homePath} /> : <Navigate to="/" />} />
       </Routes>
       <ActiveRideBar />
+
+      {/* Double-back exit toast */}
+      {showExitToast && (
+        <div className="fixed bottom-8 left-0 right-0 flex justify-center z-[99999] pointer-events-none">
+          <div className="bg-slate-800/90 text-white text-sm font-bold px-6 py-3 rounded-full shadow-2xl backdrop-blur-sm">
+            App band karne ke liye dobara press karein
+          </div>
+        </div>
+      )}
     </BrowserRouter>
   );
 };

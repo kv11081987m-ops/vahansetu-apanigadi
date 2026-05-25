@@ -156,6 +156,7 @@ const Home = () => {
   const [goodsWeight, setGoodsWeight] = useState('');
   const [isLowData, setIsLowData] = useState(false);
   const [driverLiveLocation, setDriverLiveLocation] = useState(null);
+  const [driverHeading, setDriverHeading] = useState(0);
   const [isScheduled, setIsScheduled] = useState(false);
   const [scheduledDateTime, setScheduledDateTime] = useState('');
   const [scheduledRides, setScheduledRides] = useState([]);
@@ -342,8 +343,10 @@ const Home = () => {
       return;
     }
     const unsub = onSnapshot(doc(db, 'drivers', matchedDriver.id), (snap) => {
-      if (snap.exists() && snap.data().location) {
-        setDriverLiveLocation(snap.data().location);
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.location) setDriverLiveLocation(data.location);
+        if (data.heading != null && !isNaN(data.heading)) setDriverHeading(data.heading);
       }
     });
     return () => unsub();
@@ -712,24 +715,13 @@ const Home = () => {
         timestamp: new Date()
       });
 
-      const commission = Math.round(amount * 0.08);
       const driverEarning = Math.round(amount * 0.92);
 
       if (method === 'cash') {
-        // Cash: driver already has full amount — deduct 8% commission from wallet
-        await updateDoc(doc(db, 'drivers', matchedDriver.id), {
-          walletBalance: increment(-commission),
-          totalEarnings: increment(amount),
-          totalRides: increment(1)
-        });
-        await addDoc(collection(db, 'wallet_transactions'), {
-          driverId: matchedDriver.id,
-          amount: commission,
-          type: 'commission_deducted',
-          status: 'completed',
-          note: `Cash ride commission - Fare ₹${amount}`,
-          createdAt: serverTimestamp()
-        });
+        // Cash: driver physically collected full amount.
+        // Commission deduction is handled exclusively by driver's handleCashCollected
+        // (runTransaction with already_paid guard) to prevent double-deduction.
+        // Passenger side only marks ride status + records the transaction log.
       } else {
         // Online: platform has money — credit 92.5% after commission
         await updateDoc(doc(db, 'drivers', matchedDriver.id), {
@@ -989,18 +981,20 @@ const Home = () => {
                 );
               })}
 
-            {/* Live driver tracking marker — shown during accepted/started */}
+            {/* Live driver tracking marker — arrow with heading rotation */}
             {driverLiveLocation && (
               <Marker
                 position={driverLiveLocation}
                 zIndex={2000}
                 options={{ optimized: false }}
                 icon={{
-                  url: service === 'savaari'
-                    ? 'https://cdn-icons-png.flaticon.com/512/3063/3063822.png'
-                    : 'https://cdn-icons-png.flaticon.com/512/2555/2555013.png',
-                  scaledSize: new window.google.maps.Size(52, 52),
-                  anchor: new window.google.maps.Point(26, 26)
+                  path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                  scale: 7,
+                  fillColor: service === 'savaari' ? '#2563eb' : '#16a34a',
+                  fillOpacity: 1,
+                  strokeColor: '#ffffff',
+                  strokeWeight: 2,
+                  rotation: driverHeading,
                 }}
               />
             )}
@@ -1964,30 +1958,21 @@ const Home = () => {
                 </div>
               </div>
 
-              {/* UPI QR Code */}
-              <div className="p-4 bg-white rounded-2xl shadow-inner border border-slate-100">
-                <QRCodeCanvas
-                  value={`upi://pay?pa=${PLATFORM_UPI_ID}&pn=VahanSetu&am=${currentFareBreakup.total}&cu=INR`}
-                  size={160}
-                  level="H"
-                />
-              </div>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">UPI se scan karke pay karein</p>
-              <p className="text-xs text-slate-500 font-medium">Ya driver ko nagad (cash) dein</p>
-
-              {/* Waiting indicator */}
-              <div className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3 w-full">
-                <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse flex-shrink-0" />
-                <p className="text-[11px] font-bold text-blue-700">Driver payment confirm kar raha hai...</p>
+              {/* Online Payment — Coming Soon */}
+              <div className="w-full flex flex-col items-center gap-1.5 bg-slate-100 rounded-2xl px-5 py-6 border border-slate-200">
+                <Clock size={26} className="text-slate-400 mb-1" />
+                <p className="text-sm font-black text-slate-500">Online Payment</p>
+                <p className="text-base font-black text-slate-700">Jaldi Aa Raha Hai!</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Coming Soon</p>
               </div>
 
-              {/* Fix 6: Passenger UPI self-confirm */}
+              {/* Cash Payment */}
               <button
-                onClick={() => handlePaymentSuccess('online')}
+                onClick={handlePayViaCash}
                 disabled={isPaymentLoading}
-                className="w-full py-3.5 bg-blue-600 active:bg-blue-700 text-white rounded-2xl font-black text-sm shadow-lg active:scale-95 transition-all disabled:opacity-50"
+                className="w-full py-3.5 bg-emerald-600 active:bg-emerald-700 text-white rounded-2xl font-black text-sm shadow-lg shadow-emerald-600/25 active:scale-95 transition-all disabled:opacity-50"
               >
-                Maine UPI se Pay Kar Diya ✓
+                {isPaymentLoading ? 'Processing...' : 'Maine Cash De Diya ✓'}
               </button>
             </div>
           </div>
