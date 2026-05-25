@@ -117,7 +117,7 @@ const AdminDashboard = () => {
     });
 
     // 3. Rides & Revenue Listener
-    const unsubRides = onSnapshot(query(collection(db, 'ride_requests'), orderBy('createdAt', 'desc'), limit(10000)), (snapshot) => {
+    const unsubRides = onSnapshot(query(collection(db, 'ride_requests'), orderBy('createdAt', 'desc'), limit(500)), (snapshot) => {
       const rides = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRecentRides(rides);
       

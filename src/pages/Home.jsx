@@ -871,7 +871,7 @@ const Home = () => {
   };
 
   const handleShareTrip = () => {
-    const text = `I am on a VahanSetu ride with ${matchedDriver?.name}. \nPickup: ${pickupInput} \nDestination: ${destInput} \nOTP: ${otp} \nTrack me here: ${window.location.href}`;
+    const text = `Main VahanSetu ride par hoon!\nDriver: ${matchedDriver?.name || 'Partner'}\nPickup: ${pickupInput}\nDestination: ${destInput}\nSurakshit rahein — VahanSetu`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
