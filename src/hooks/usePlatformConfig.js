@@ -11,6 +11,8 @@ const PLATFORM_DEFAULTS = {
   appStatus: 'active',
   maintenanceMessage: '',
   upiId: '',
+  grievancePhone: '7529938896',
+  grievanceEmail: 'apnigadivahansetu@gmail.com',
 };
 
 export function usePlatformConfig() {

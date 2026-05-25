@@ -84,7 +84,6 @@ const Home = () => {
   const [isSafetyModalOpen, setIsSafetyModalOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeSidebarModal, setActiveSidebarModal] = useState(null); // 'history', 'wallet', 'support', 'grievance'
-  const [grievancePhone, setGrievancePhone] = useState('7529938896');
   const [walletTxns, setWalletTxns] = useState(null); // null = not loaded yet
 
   const { isLoaded } = useJsApiLoader({
@@ -94,26 +93,7 @@ const Home = () => {
     version: 'weekly'
   });
 
-  useEffect(() => {
-    // Razorpay script disabled during testing to avoid console errors
-    /*
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
-    }
-    */
-  }, []);
 
-  useEffect(() => {
-    getDoc(doc(db, 'config', 'platform')).then(snap => {
-      if (snap.exists() && snap.data().grievancePhone) {
-        setGrievancePhone(snap.data().grievancePhone);
-      }
-    }).catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (activeSidebarModal !== 'wallet' || !user) return;
@@ -376,14 +356,14 @@ const Home = () => {
   const isBookingRef = useRef(false);
 
   const handleConfirmBooking = async () => {
-    if (!user?.uid) { alert('User not logged in!'); return; }
-    if (!pickup) { alert("Kripya pickup location select karein."); return; }
-    if (!destination) { alert("Kripya destination select karein."); return; }
+    if (!user?.uid) { showToast('Pehle login karein.', 'error'); return; }
+    if (!pickup) { showToast('Kripya pickup location select karein.', 'error'); return; }
+    if (!destination) { showToast('Kripya destination select karein.', 'error'); return; }
     if (isBookingRef.current) return;
 
     const dist = calculateDistance(pickup.lat, pickup.lng, destination.lat, destination.lng);
     if (dist < 0.1) {
-      alert("Pickup aur destination same jagah nahi ho sakta. Kripya alag destination chunein.");
+      showToast('Pickup aur destination same jagah nahi ho sakta.', 'error');
       return;
     }
 
@@ -392,14 +372,14 @@ const Home = () => {
     // ── Scheduled booking path ──────────────────────────────────────────
     if (isScheduled) {
       if (!scheduledDateTime) {
-        alert('Kripya date aur time select karein.');
+        showToast('Kripya date aur time select karein.', 'error');
         isBookingRef.current = false;
         return;
       }
       const schedDate = new Date(scheduledDateTime);
       // eslint-disable-next-line react-hooks/purity
       if (schedDate < new Date(Date.now() + 29 * 60 * 1000)) {
-        alert('Scheduled time kam se kam 30 minute baad hona chahiye.');
+        showToast('Scheduled time kam se kam 30 minute baad hona chahiye.', 'error');
         isBookingRef.current = false;
         return;
       }
@@ -430,7 +410,7 @@ const Home = () => {
         setBookingStatus('scheduled');
       } catch (err) {
         console.error('Scheduled booking error:', err);
-        alert('Scheduling failed. Dobara try karein.');
+        showToast('Scheduling fail ho gayi. Dobara try karein.', 'error');
         setBookingStatus('idle');
       } finally {
         isBookingRef.current = false;
@@ -464,7 +444,7 @@ const Home = () => {
       findAndAssignDriver(docRef.id, vType, rideOtp, { goodsType, goodsWeight });
     } catch (err) {
       console.error('[BOOKING] FAILED:', err);
-      alert('Booking Error: ' + err.message);
+      showToast('Booking fail ho gayi. Dobara try karein.', 'error');
       setBookingStatus('idle');
     } finally {
       isBookingRef.current = false;
@@ -660,7 +640,7 @@ const Home = () => {
       setScheduledRides(prev => prev.filter(r => r.id !== rideId));
     } catch (err) {
       console.error('Cancel scheduled ride error:', err);
-      alert('Cancel nahi ho saka. Dobara try karein.');
+      showToast('Cancel nahi ho saka. Dobara try karein.', 'error');
     }
   };
 
@@ -862,7 +842,7 @@ const Home = () => {
     if (matchedDriver?.phone) {
       window.location.href = `tel:${matchedDriver.phone}`;
     } else {
-      alert("Driver phone number not available.");
+      showToast('Driver ka phone number available nahi hai.', 'error');
     }
   };
 
@@ -891,7 +871,7 @@ const Home = () => {
             }
           });
         }
-      }, () => alert("Location access denied."));
+      }, () => showToast('Location access denied. Settings mein allow karein.', 'error'));
     }
   };
 
@@ -1170,7 +1150,7 @@ const Home = () => {
                   ) : (
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Safety First: Stay in vehicle</p>
-                      <button onClick={handleSOS} className="w-9 h-9 bg-red-600 rounded-full flex items-center justify-center shadow-lg">
+                      <button onClick={async () => { await handleSOS(); window.open('tel:112'); }} className="w-9 h-9 bg-red-600 rounded-full flex items-center justify-center shadow-lg">
                         <AlertCircle size={15} className="text-white" />
                       </button>
                     </div>
@@ -1418,10 +1398,10 @@ const Home = () => {
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">We are here to help you 24/7</p>
                   </div>
                   <div className="space-y-4">
-                    <button onClick={() => window.open(`https://wa.me/91${grievancePhone}`, '_blank')} className="w-full p-5 bg-emerald-600 text-white rounded-3xl flex items-center justify-center gap-4 font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all">
+                    <button onClick={() => window.open(`https://wa.me/91${config.grievancePhone}`, '_blank')} className="w-full p-5 bg-emerald-600 text-white rounded-3xl flex items-center justify-center gap-4 font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all">
                       CHAT ON WHATSAPP
                     </button>
-                    <button onClick={() => window.location.href = `tel:+91${grievancePhone}`} className="w-full p-5 bg-slate-900 text-white rounded-3xl flex items-center justify-center gap-4 font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all">
+                    <button onClick={() => window.location.href = `tel:+91${config.grievancePhone}`} className="w-full p-5 bg-slate-900 text-white rounded-3xl flex items-center justify-center gap-4 font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all">
                       CALL SUPPORT
                     </button>
                   </div>
@@ -1444,13 +1424,13 @@ const Home = () => {
                     </div>
                     <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100">
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Phone / WhatsApp</p>
-                      <p className="text-sm font-black text-slate-800">+91 {grievancePhone}</p>
+                      <p className="text-sm font-black text-slate-800">+91 {config.grievancePhone}</p>
                     </div>
                     <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl">
                       <p className="text-[11px] font-bold text-amber-800 text-center">Response time: 24-48 hours</p>
                     </div>
                     <button
-                      onClick={() => window.open(`tel:+91${grievancePhone}`)}
+                      onClick={() => window.open(`tel:+91${config.grievancePhone}`)}
                       className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all"
                     >
                       Call Now
@@ -1565,8 +1545,8 @@ const Home = () => {
                   <ChevronRight size={16} className="text-slate-300 group-hover:text-emerald-500" />
                 </button>
 
-                <button 
-                  onClick={handleSOS}
+                <button
+                  onClick={async () => { await handleSOS(); window.open('tel:112'); }}
                   className="w-full p-5 bg-red-50 rounded-3xl flex items-center justify-between group hover:bg-red-100 transition-all border border-red-100"
                 >
                   <div className="flex items-center gap-4">
@@ -1971,27 +1951,6 @@ const Home = () => {
                 {isPaymentLoading ? 'Processing...' : 'Maine Cash De Diya ✓'}
               </button>
             </div>
-          </div>
-        )}
-
-        {bookingStatus === 'awaiting_cash_confirmation' && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[2000] flex items-center justify-center p-6">
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm text-center shadow-2xl border-2 border-blue-100"
-            >
-              <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-                <IndianRupee size={40} />
-              </div>
-              <h3 className="text-2xl font-black text-slate-800 mb-2">Awaiting Confirmation</h3>
-              <p className="text-slate-500 font-medium mb-6">Kripya app band na karein. Driver ke confirmation ka intezar hai.</p>
-              
-              <div className="p-4 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Amount to Pay</p>
-                <p className="text-3xl font-black text-slate-800">₹{calculateFare()}</p>
-              </div>
-            </motion.div>
           </div>
         )}
 

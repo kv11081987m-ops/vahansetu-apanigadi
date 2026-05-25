@@ -99,10 +99,12 @@ export const RideProvider = ({ children }) => {
       return () => { unsub1(); unsub2(); clearTimeout(nullClearTimeout); };
     }
 
-    // Passenger query — single equality clause, client-side filtering avoids composite index
+    // Passenger query — single equality clause, client-side filtering avoids composite index.
+    // limit(50) caps download size; active rides are always among the most recent.
     const q = query(
       collection(db, 'ride_requests'),
-      where('userId', '==', user.uid)
+      where('userId', '==', user.uid),
+      limit(50)
     );
 
     const unsub = onSnapshot(q, (snapshot) => {

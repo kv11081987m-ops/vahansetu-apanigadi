@@ -545,7 +545,6 @@ const DriverDashboard = () => {
   const [isDriverCardMinimized, setIsDriverCardMinimized] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isGrievanceOpen, setIsGrievanceOpen] = useState(false);
-  const [grievancePhone, setGrievancePhone] = useState('7529938896');
   const [toast, setToast] = useState(null);
   const [privateProfile, setPrivateProfile] = useState(null);
   const [locationError, setLocationError] = useState(null);
@@ -558,13 +557,6 @@ const DriverDashboard = () => {
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  useEffect(() => {
-    getDoc(doc(db, 'config', 'platform')).then(snap => {
-      if (snap.exists() && snap.data().grievancePhone) {
-        setGrievancePhone(snap.data().grievancePhone);
-      }
-    }).catch(() => {});
-  }, []);
 
   const prevNewRequestStatusRef = useRef(null);
 
@@ -953,7 +945,7 @@ const DriverDashboard = () => {
       });
     } catch (e) {
       console.error("Acceptance failed:", e);
-      alert(e);
+      showToast(e?.message || String(e) || 'Ride accept nahi ho saki. Dobara try karein.', 'error');
       setNewRequest(null);
     }
   };
@@ -1055,15 +1047,15 @@ const DriverDashboard = () => {
           cashEarnings: increment(finalFare),
           totalRides: increment(1),
         });
-      });
-      await addDoc(collection(db, 'wallet_transactions'), {
-        driverId,
-        amount: commission,
-        fareCollected: finalFare,
-        type: 'commission_deducted',
-        status: 'completed',
-        note: `Cash ride - Fare ₹${finalFare}, Platform Fee ₹${commission}`,
-        createdAt: serverTimestamp(),
+        txn.set(doc(collection(db, 'wallet_transactions')), {
+          driverId,
+          amount: commission,
+          fareCollected: finalFare,
+          type: 'commission_deducted',
+          status: 'completed',
+          note: `Cash ride - Fare ₹${finalFare}, Platform Fee ₹${commission}`,
+          createdAt: serverTimestamp(),
+        });
       });
       // Clear pending payment state after success
       localStorage.removeItem('pendingPaymentRideId');
@@ -1946,13 +1938,13 @@ const DriverDashboard = () => {
                 </div>
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Phone / WhatsApp</p>
-                  <p className="text-sm font-black text-slate-800">+91 {grievancePhone}</p>
+                  <p className="text-sm font-black text-slate-800">+91 {config.grievancePhone}</p>
                 </div>
                 <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
                   <p className="text-[11px] font-bold text-amber-800 text-center">Response time: 24-48 hours</p>
                 </div>
                 <button
-                  onClick={() => window.open(`tel:+91${grievancePhone}`)}
+                  onClick={() => window.open(`tel:+91${config.grievancePhone}`)}
                   className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all"
                 >
                   Call Now
