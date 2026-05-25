@@ -26,7 +26,10 @@ import {
   Scale,
   LogOut,
   History,
-  Bell
+  Bell,
+  Gift,
+  Copy,
+  Users
 } from 'lucide-react';
 import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction } from 'firebase/firestore';
 import { db } from '../services/firebase';
@@ -85,6 +88,8 @@ const Home = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeSidebarModal, setActiveSidebarModal] = useState(null); // 'history', 'wallet', 'support', 'grievance'
   const [walletTxns, setWalletTxns] = useState(null); // null = not loaded yet
+  const [myReferrals, setMyReferrals] = useState(null); // null = not loaded yet
+  const [referralCopied, setReferralCopied] = useState(false);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -104,6 +109,16 @@ const Home = () => {
       setWalletTxns(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }).catch(() => setWalletTxns([]));
   }, [activeSidebarModal, user, walletTxns]);
+
+  useEffect(() => {
+    if (activeSidebarModal !== 'refer' || !user) return;
+    if (myReferrals !== null) return;
+    getDocs(
+      query(collection(db, 'referrals'), where('referrerId', '==', user.uid), limit(20))
+    ).then(snap => {
+      setMyReferrals(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }).catch(() => setMyReferrals([]));
+  }, [activeSidebarModal, user, myReferrals]);
 
   const { drivers } = useLiveDrivers(service, isLoaded);
   // Drivers count for badge
@@ -1229,6 +1244,7 @@ const Home = () => {
 
                 <SidebarLink icon={<History size={18} />} label="Ride History" onClick={() => { setActiveSidebarModal('history'); setIsSidebarOpen(false); }} />
                 <SidebarLink icon={<CreditCard size={18} />} label="Ride Credit Balance" onClick={() => { setActiveSidebarModal('wallet'); setIsSidebarOpen(false); }} />
+                <SidebarLink icon={<Gift size={18} />} label="Refer & Earn" onClick={() => { setActiveSidebarModal('refer'); setIsSidebarOpen(false); }} />
                 <SidebarLink icon={<ShieldCheck size={18} />} label="Safety Settings" onClick={() => { setIsSafetyModalOpen(true); setIsSidebarOpen(false); }} />
                 <SidebarLink icon={<Clock size={18} />} label="Scheduled Rides" onClick={() => { setActiveSidebarModal('scheduled'); setIsSidebarOpen(false); }} />
                 <div className="h-px bg-slate-100 my-4" />
@@ -1380,6 +1396,112 @@ const Home = () => {
                               {tx.method === 'cash' ? 'Cash Ride' : tx.method === 'online' ? 'Online Ride' : 'Ride Payment'}
                             </span>
                             <span className="text-xs font-black text-red-500">-₹{tx.amount}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeSidebarModal === 'refer' && (
+                <div className="space-y-6 py-4">
+                  {/* Header */}
+                  <div className="text-center">
+                    <div className="w-20 h-20 bg-amber-50 text-amber-500 rounded-[2rem] flex items-center justify-center mx-auto mb-4">
+                      <Gift size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-slate-800">Refer & Earn</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Dono ko milega reward!</p>
+                  </div>
+
+                  {/* How it works */}
+                  <div className="bg-amber-50 border border-amber-100 rounded-3xl p-5 space-y-3">
+                    <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest mb-2">Kaise kaam karta hai</p>
+                    {[
+                      { step: '1', text: `Apna VS-ID share karo` },
+                      { step: '2', text: `Friend register kare aur pehli ride le` },
+                      { step: '3', text: `Aapko ₹${config.referralReferrerReward} + Friend ko ₹${config.referralRefereeReward} milega` },
+                    ].map(({ step, text }) => (
+                      <div key={step} className="flex items-center gap-3">
+                        <div className="w-6 h-6 bg-amber-500 text-white rounded-full flex items-center justify-center text-[10px] font-black shrink-0">{step}</div>
+                        <p className="text-xs font-bold text-amber-800">{text}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Your VS-ID share card */}
+                  <div className="bg-slate-900 rounded-3xl p-5">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Aapka Referral Code</p>
+                    <div className="flex items-center justify-between bg-white/10 rounded-2xl px-4 py-3 mb-4">
+                      <span className="text-2xl font-black text-white tracking-widest">{userProfile?.displayId || 'VS-...'}</span>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard?.writeText(userProfile?.displayId || '').catch(() => {});
+                          setReferralCopied(true);
+                          setTimeout(() => setReferralCopied(false), 2000);
+                        }}
+                        className="flex items-center gap-1.5 bg-white/20 px-3 py-1.5 rounded-xl text-white text-[10px] font-black active:scale-95 transition-all"
+                      >
+                        <Copy size={12} /> {referralCopied ? 'Copied!' : 'Copy'}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const text = `VahanSetu pe ride book karo! Mera referral code use karo: ${userProfile?.displayId}\n\nRegister karo: https://vahansetuapnigadi.web.app\n\nPehli ride pe tumhe ₹${config.referralRefereeReward} milenge, mujhe ₹${config.referralReferrerReward}!`;
+                        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                      }}
+                      className="w-full py-3 bg-emerald-500 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Users size={14} /> WhatsApp pe Share Karo
+                    </button>
+                  </div>
+
+                  {/* Balance with 50% rule */}
+                  <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Meri Ride Credit</p>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-bold text-slate-600">Total Balance</span>
+                      <span className="text-xl font-black text-slate-800">₹{Number(userProfile?.balance || 0).toFixed(0)}</span>
+                    </div>
+                    <div className="flex justify-between items-center mb-3">
+                      <span className="text-sm font-bold text-slate-600">Usable (50% rule)</span>
+                      <span className="text-xl font-black text-emerald-600">₹{Math.floor((userProfile?.balance || 0) * 0.5)}</span>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3">
+                      <p className="text-[10px] font-bold text-blue-700 text-center leading-relaxed">
+                        Ek ride mein max 50% balance use kar sakte hain.<br />
+                        Online payment launch hone ke baad automatically deduct hoga.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Referral history */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Mere Referrals</p>
+                    {myReferrals === null ? (
+                      <div className="space-y-2">{[1,2].map(i => <div key={i} className="h-12 bg-slate-100 rounded-2xl animate-pulse" />)}</div>
+                    ) : myReferrals.length === 0 ? (
+                      <div className="text-center py-6 bg-slate-50 rounded-3xl border border-slate-100">
+                        <Gift size={28} className="text-slate-300 mx-auto mb-2" />
+                        <p className="text-xs font-bold text-slate-400">Abhi tak koi referral nahi</p>
+                        <p className="text-[10px] font-bold text-slate-300 mt-1">VS-ID share karo aur earn karo!</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {myReferrals.map(ref => (
+                          <div key={ref.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div>
+                              <p className="text-xs font-black text-slate-700">{ref.refereeName}</p>
+                              <p className="text-[9px] font-bold text-slate-400">{ref.refereeDisplayId}</p>
+                            </div>
+                            {ref.status === 'rewarded' ? (
+                              <div className="text-right">
+                                <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">+₹{ref.referrerReward || config.referralReferrerReward} Credited</span>
+                              </div>
+                            ) : (
+                              <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Pehli ride baki</span>
+                            )}
                           </div>
                         ))}
                       </div>

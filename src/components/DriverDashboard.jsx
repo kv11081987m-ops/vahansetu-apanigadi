@@ -504,6 +504,75 @@ const KycForm = ({ driverId, isUploading, setIsUploading }) => {
   );
 };
 
+const DriverReferSection = ({ config, driverId, profile }) => {
+  const [myReferrals, setMyReferrals] = React.useState(null);
+  const [copied, setCopied] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!driverId) return;
+    getDocs(query(collection(db, 'referrals'), where('referrerId', '==', driverId), limit(20)))
+      .then(snap => setMyReferrals(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(() => setMyReferrals([]));
+  }, [driverId]);
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Refer &amp; Earn</h3>
+      <div className="bg-amber-50 border border-amber-100 rounded-[2rem] p-6 space-y-3">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-10 h-10 bg-amber-500 text-white rounded-2xl flex items-center justify-center"><Star size={18} /></div>
+          <div>
+            <p className="text-sm font-black text-slate-800">Dosto ko refer karo</p>
+            <p className="text-[10px] font-bold text-slate-500">Unki pehli ride pe ₹{config.referralReferrerReward} tumhe milega</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between bg-white rounded-2xl px-4 py-3 border border-amber-200">
+          <span className="text-lg font-black text-slate-800 tracking-widest">{profile?.displayId || 'VS-...'}</span>
+          <button
+            onClick={() => { navigator.clipboard?.writeText(profile?.displayId || '').catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+            className="flex items-center gap-1.5 bg-amber-500 text-white px-3 py-1.5 rounded-xl text-[10px] font-black active:scale-95 transition-all"
+          >
+            {copied ? '✓ Copied' : 'Copy'}
+          </button>
+        </div>
+        <button
+          onClick={() => {
+            const text = `VahanSetu pe chalao ya ride lo! Mera referral code: ${profile?.displayId}\n\nhttps://vahansetuapnigadi.web.app\n\nPehli ride pe ₹${config.referralRefereeReward} milenge!`;
+            window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+          }}
+          className="w-full py-3 bg-emerald-500 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all"
+        >
+          WhatsApp pe Share Karo
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Mere Referrals</p>
+        {myReferrals === null ? (
+          <div className="space-y-2">{[1,2].map(i => <div key={i} className="h-12 bg-slate-100 rounded-2xl animate-pulse" />)}</div>
+        ) : myReferrals.length === 0 ? (
+          <div className="text-center py-5 bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+            <p className="text-xs font-bold text-slate-400">Abhi tak koi referral nahi</p>
+          </div>
+        ) : (
+          myReferrals.map(ref => (
+            <div key={ref.id} className="flex items-center justify-between p-3 bg-white rounded-2xl border border-slate-100">
+              <div>
+                <p className="text-xs font-black text-slate-700">{ref.refereeName}</p>
+                <p className="text-[9px] font-bold text-slate-400">{ref.refereeDisplayId}</p>
+              </div>
+              {ref.status === 'rewarded'
+                ? <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">+₹{ref.referrerReward || config.referralReferrerReward} Credited</span>
+                : <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Pehli ride baki</span>
+              }
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
 const DriverDashboard = () => {
   const { logout } = useAuth();
   const { config } = usePlatformConfig();
@@ -1847,6 +1916,9 @@ const DriverDashboard = () => {
                 )}
               </div>
             </div>
+
+            {/* Refer & Earn Section */}
+            <DriverReferSection config={config} driverId={driverId} profile={profile} />
           </div>
         </div>
       )}

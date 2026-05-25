@@ -13,6 +13,9 @@ const PLATFORM_DEFAULTS = {
   upiId: '',
   grievancePhone: '7529938896',
   grievanceEmail: 'apnigadivahansetu@gmail.com',
+  referralReferrerReward: 20,   // referrer ko milega (first ride pe)
+  referralRefereeReward: 25,    // naye user ko milega (first ride pe)
+  referralCreditUsagePercent: 50, // ek ride mein max 50% balance use
 };
 
 export function usePlatformConfig() {

@@ -11,7 +11,7 @@ import {
   indexedDBLocalPersistence,
   browserLocalPersistence
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, increment, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, increment, collection, query, where, getDocs, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 
 const AuthContext = createContext();
@@ -246,7 +246,7 @@ export const AuthProvider = ({ children }) => {
       displayId: data.displayId || generateShortId(),
       phoneNumber: auth.currentUser.phoneNumber,
       role: data.role,
-      balance: data.referredBy ? 15 : 0,
+      balance: 0,
       createdAt: new Date().toISOString(),
       sessionId: newSid,
       ...safeData
@@ -276,19 +276,26 @@ export const AuthProvider = ({ children }) => {
     }
 
     if (data.referredBy) {
-      const q = query(collection(db, 'users'), where('displayId', '==', data.referredBy));
-      const referrerSnap = await getDocs(q);
-      if (!referrerSnap.empty) {
-        const referrerDoc = referrerSnap.docs[0];
-        await updateDoc(doc(db, 'users', referrerDoc.id), {
-          balance: increment(10)
-        });
-        const drvDoc = await getDoc(doc(db, 'drivers', referrerDoc.id));
-        if (drvDoc.exists()) {
-          await updateDoc(doc(db, 'drivers', referrerDoc.id), {
-            walletBalance: increment(10)
+      try {
+        const q = query(collection(db, 'users'), where('displayId', '==', data.referredBy.toUpperCase()));
+        const referrerSnap = await getDocs(q);
+        if (!referrerSnap.empty) {
+          const referrerDoc = referrerSnap.docs[0];
+          // Create pending referral — Cloud Function will credit both on first ride
+          await addDoc(collection(db, 'referrals'), {
+            referrerId: referrerDoc.id,
+            referrerDisplayId: data.referredBy.toUpperCase(),
+            refereeId: uid,
+            refereeName: data.name || 'New User',
+            refereeDisplayId: profile.displayId,
+            status: 'pending',
+            createdAt: serverTimestamp(),
+            rewardedAt: null,
           });
         }
+      } catch (e) {
+        console.error('[registerUser] referral doc error:', e);
+        // Non-critical — registration still completes
       }
     }
 

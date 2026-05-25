@@ -228,6 +228,22 @@ service cloud.firestore {
     }
 
 
+    // ── REFERRALS ─────────────────────────────────────────────────────────────
+    match /referrals/{referralId} {
+      allow read: if isLoggedIn() && (
+        resource.data.referrerId == request.auth.uid ||
+        resource.data.refereeId == request.auth.uid ||
+        isAdmin()
+      );
+      // Only the referee (new user) creates their own referral on registration
+      allow create: if isLoggedIn()
+        && request.resource.data.refereeId == request.auth.uid
+        && request.resource.data.status == 'pending';
+      // Only admin or Cloud Function (admin SDK bypasses rules) can update
+      allow update, delete: if isAdmin();
+    }
+
+
     // ── ID LOOKUP ─────────────────────────────────────────────────────────────
     // Public mapping: displayId → phone number, used for pre-auth VS-ID login.
     // Only contains phone — no other PII. Readable without auth intentionally.

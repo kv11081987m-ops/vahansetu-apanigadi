@@ -1,8 +1,8 @@
 // runtime: nodejs22
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { getFirestore, Timestamp, FieldValue } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
 
 initializeApp();
@@ -141,5 +141,83 @@ exports.processScheduledRides = onSchedule(
     }
 
     console.log(`[Scheduler] Processed ${snap.size} scheduled rides`);
+  }
+);
+
+/**
+ * Triggers when a ride_request is updated.
+ * On first payment_done ride of a referred user, credits both referrer and referee.
+ */
+exports.processReferralReward = onDocumentUpdated(
+  { document: 'ride_requests/{rideId}', region: 'asia-south1' },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+
+    // Only act when status changes TO payment_done
+    if (before.status === after.status) return;
+    if (after.status !== 'payment_done') return;
+
+    const userId = after.userId;
+    if (!userId) return;
+
+    // Check for a pending referral where this user is the referee
+    const referralSnap = await db.collection('referrals')
+      .where('refereeId', '==', userId)
+      .where('status', '==', 'pending')
+      .limit(1)
+      .get();
+
+    if (referralSnap.empty) return;
+
+    // Check if this is the user's FIRST paid ride
+    const paidRidesSnap = await db.collection('ride_requests')
+      .where('userId', '==', userId)
+      .where('status', '==', 'payment_done')
+      .limit(2)
+      .get();
+
+    // If more than 1 payment_done ride, not the first — skip
+    if (paidRidesSnap.size > 1) return;
+
+    // Read platform config for reward amounts
+    const configSnap = await db.collection('config').doc('platform').get();
+    const config = configSnap.exists ? configSnap.data() : {};
+    const referrerReward = config.referralReferrerReward || 20;
+    const refereeReward = config.referralRefereeReward || 25;
+
+    const referralDoc = referralSnap.docs[0];
+    const referral = referralDoc.data();
+    const referrerId = referral.referrerId;
+
+    console.log(`[Referral] Rewarding: referrer=${referrerId} +₹${referrerReward}, referee=${userId} +₹${refereeReward}`);
+
+    // Atomic: mark referral rewarded + credit both users
+    await db.runTransaction(async (txn) => {
+      txn.update(referralDoc.ref, {
+        status: 'rewarded',
+        rewardedAt: FieldValue.serverTimestamp(),
+        referrerReward,
+        refereeReward,
+      });
+      txn.update(db.collection('users').doc(referrerId), {
+        balance: FieldValue.increment(referrerReward),
+      });
+      txn.update(db.collection('users').doc(userId), {
+        balance: FieldValue.increment(refereeReward),
+      });
+    });
+
+    // Also credit driver wallet if referrer is a driver (non-critical, best-effort)
+    try {
+      const driverSnap = await db.collection('drivers').doc(referrerId).get();
+      if (driverSnap.exists) {
+        await driverSnap.ref.update({ walletBalance: FieldValue.increment(referrerReward) });
+      }
+    } catch (e) {
+      console.error('[Referral] Driver wallet credit error:', e);
+    }
+
+    console.log(`[Referral] Reward complete for referral ${referralDoc.id}`);
   }
 );

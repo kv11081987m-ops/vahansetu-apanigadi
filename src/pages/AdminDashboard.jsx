@@ -24,7 +24,8 @@ import {
   Unlock,
   Lock,
   Plus,
-  Minus
+  Minus,
+  Gift
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
@@ -76,6 +77,9 @@ const AdminDashboard = () => {
     grievancePhone: '7529938896',
     grievanceEmail: 'apnigadivahansetu@gmail.com',
     upiId: '',
+    referralReferrerReward: 20,
+    referralRefereeReward: 25,
+    referralCreditUsagePercent: 50,
   });
   const [configSaving, setConfigSaving] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
@@ -1515,6 +1519,40 @@ const AdminDashboard = () => {
                     ⚠ UPI ID abhi set nahi hai
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Refer & Earn Config */}
+            <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+              <h3 className="font-black text-white uppercase tracking-widest text-sm mb-2 flex items-center gap-3">
+                <Gift size={18} className="text-amber-400" /> Refer &amp; Earn Settings
+              </h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-5">Pehli ride ke baad dono ko reward milega</p>
+              <div className="flex flex-col gap-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Referrer Reward (₹) — jo share karta hai use</span>
+                  <input type="number" min="0" value={platformConfig.referralReferrerReward}
+                    onChange={e => setPlatformConfig(p => ({ ...p, referralReferrerReward: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                  <span className="text-[10px] text-slate-500">Default: ₹20</span>
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Referee Reward (₹) — jo refer hua naya user</span>
+                  <input type="number" min="0" value={platformConfig.referralRefereeReward}
+                    onChange={e => setPlatformConfig(p => ({ ...p, referralRefereeReward: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                  <span className="text-[10px] text-slate-500">Default: ₹25</span>
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Max Credit Usage per Ride (%)</span>
+                  <input type="number" min="1" max="100" value={platformConfig.referralCreditUsagePercent}
+                    onChange={e => setPlatformConfig(p => ({ ...p, referralCreditUsagePercent: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                  <span className="text-[10px] text-slate-500">Default: 50% — ek ride mein balance ka max {platformConfig.referralCreditUsagePercent}% use ho sakta hai</span>
+                </label>
+                <div className="bg-slate-900/60 rounded-xl px-4 py-3 text-[11px] text-amber-400 font-bold">
+                  Refer karo → Friend pehli ride le → Referrer +₹{platformConfig.referralReferrerReward} · Friend +₹{platformConfig.referralRefereeReward}
+                </div>
               </div>
             </div>
 
