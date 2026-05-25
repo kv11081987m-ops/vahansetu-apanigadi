@@ -192,21 +192,34 @@ exports.processReferralReward = onDocumentUpdated(
 
     console.log(`[Referral] Rewarding: referrer=${referrerId} +₹${referrerReward}, referee=${userId} +₹${refereeReward}`);
 
-    // Atomic: mark referral rewarded + credit both users
-    await db.runTransaction(async (txn) => {
-      txn.update(referralDoc.ref, {
-        status: 'rewarded',
-        rewardedAt: FieldValue.serverTimestamp(),
-        referrerReward,
-        refereeReward,
+    // Atomic: re-read referral status inside transaction to prevent double-credit
+    // on concurrent payment_done triggers (retry / race condition).
+    try {
+      await db.runTransaction(async (txn) => {
+        const referralLive = await txn.get(referralDoc.ref);
+        if (!referralLive.exists || referralLive.data().status !== 'pending') {
+          throw new Error('already_rewarded');
+        }
+        txn.update(referralDoc.ref, {
+          status: 'rewarded',
+          rewardedAt: FieldValue.serverTimestamp(),
+          referrerReward,
+          refereeReward,
+        });
+        txn.update(db.collection('users').doc(referrerId), {
+          balance: FieldValue.increment(referrerReward),
+        });
+        txn.update(db.collection('users').doc(userId), {
+          balance: FieldValue.increment(refereeReward),
+        });
       });
-      txn.update(db.collection('users').doc(referrerId), {
-        balance: FieldValue.increment(referrerReward),
-      });
-      txn.update(db.collection('users').doc(userId), {
-        balance: FieldValue.increment(refereeReward),
-      });
-    });
+    } catch (e) {
+      if (e.message === 'already_rewarded') {
+        console.log(`[Referral] Skipped — referral ${referralDoc.id} already rewarded (race condition caught).`);
+        return;
+      }
+      throw e;
+    }
 
     // Also credit driver wallet if referrer is a driver (non-critical, best-effort)
     try {

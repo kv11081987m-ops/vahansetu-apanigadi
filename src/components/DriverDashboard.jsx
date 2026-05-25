@@ -352,7 +352,7 @@ const PhotoUploadBox = ({ name, label, required, icon: Icon }) => {
   );
 };
 
-const KycForm = ({ driverId, isUploading, setIsUploading }) => {
+const KycForm = ({ driverId, isUploading, setIsUploading, showToast }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsUploading(true);
@@ -400,10 +400,10 @@ const KycForm = ({ driverId, isUploading, setIsUploading }) => {
         policeVerificationDeadline,
       }, { merge: true });
 
-      alert('KYC Submit ho gaya! Admin 12-24 ghante mein verify karega.');
+      showToast('KYC Submit ho gaya! Admin 12-24 ghante mein verify karega.', 'success');
     } catch (err) {
       console.error(err);
-      alert('Upload fail hua: ' + err.message);
+      showToast('Upload fail hua: ' + err.message, 'error');
     } finally {
       setIsUploading(false);
     }
@@ -967,7 +967,7 @@ const DriverDashboard = () => {
     
     // Block Online status if not verified
     if (!isOnline && profile?.verificationStatus !== 'verified') {
-      alert("Please complete your KYC verification in the 'Verify' tab to go online.");
+      showToast("KYC verify karein — 'Verify' tab mein jaayein.", 'error');
       setActiveTab('verify');
       return;
     }
@@ -1035,25 +1035,25 @@ const DriverDashboard = () => {
     
     // Security Check: Ensure ride is accepted by this driver before starting
     if (newRequest.status !== 'accepted' || newRequest.driverId !== driverId) {
-      alert("Invalid operation. Ride must be accepted first.");
+      showToast('Invalid operation. Ride must be accepted first.', 'error');
       return;
     }
 
     if (!newRequest.otp) {
       console.error("[CRITICAL] Ride has no OTP in DB!");
-      alert("Error: Ride session is invalid (No OTP). Please contact support.");
+      showToast('Error: Ride session invalid (No OTP). Support se sampark karein.', 'error');
       return;
     }
 
     if (enteredOtp === newRequest.otp?.toString()) {
-      await updateDoc(doc(db, 'ride_requests', newRequest.id), { 
+      await updateDoc(doc(db, 'ride_requests', newRequest.id), {
         status: 'started',
-        startedAt: serverTimestamp() 
+        startedAt: serverTimestamp()
       });
       setEnteredOtp('');
       setIsDriverCardMinimized(true);
     } else {
-      alert("Invalid OTP. Please ask the passenger for the correct code.");
+      showToast('Galat OTP. Passenger se sahi code maangein.', 'error');
     }
   };
 
@@ -1145,9 +1145,13 @@ const DriverDashboard = () => {
     e.preventDefault();
     const amount = Number(withdrawAmount);
     if (!amount || amount < 50) {
-      return alert("Minimum withdrawal amount is ₹50.");
+      showToast('Minimum withdrawal amount ₹50 hai.', 'error');
+      return;
     }
-    if (!upiId) return alert("Please enter a valid UPI ID.");
+    if (!upiId) {
+      showToast('Valid UPI ID darj karein.', 'error');
+      return;
+    }
 
     try {
       const driverRef = doc(db, 'drivers', driverId);
@@ -1182,25 +1186,25 @@ const DriverDashboard = () => {
         });
       });
 
-      alert("Request Sent!");
+      showToast('Withdrawal request bhej di gayi!', 'success');
       setIsWithdrawModalOpen(false);
       setWithdrawAmount('');
       setUpiId('');
     } catch (err) {
       console.error(err);
-      alert("Error: " + err.message);
+      showToast('Error: ' + err.message, 'error');
     }
   };
 
   const handleForceClearRide = async () => {
     if (!newRequest) return;
-    if (window.confirm("Do you want to clear this stuck ride?")) {
-      await updateDoc(doc(db, 'ride_requests', newRequest.id), { 
+    try {
+      await updateDoc(doc(db, 'ride_requests', newRequest.id), {
         status: 'cancelled',
         cancelledReason: 'driver_forced_clear'
       });
-      setNewRequest(null);
-    }
+    } catch { /* best-effort */ }
+    setNewRequest(null);
   };
 
   const t = {
@@ -1806,7 +1810,7 @@ const DriverDashboard = () => {
                 <p className="text-blue-700/70 text-sm font-medium">Admin is reviewing your documents. Please wait 12-24 hours.</p>
               </div>
             ) : (
-              <KycForm driverId={driverId} setIsUploading={setIsUploading} isUploading={isUploading} />
+              <KycForm driverId={driverId} setIsUploading={setIsUploading} isUploading={isUploading} showToast={showToast} />
             )}
           </div>
         </div>
@@ -1853,7 +1857,7 @@ const DriverDashboard = () => {
               </div>
               <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Platform Fee (8%)</p>
-                <p className="text-2xl font-black text-red-500">₹{Math.round((stats.totalEarnings || 0) * 0.08 / 0.92) || 0}</p>
+                <p className="text-2xl font-black text-red-500">₹{Math.round((stats.totalEarnings || 0) * ((config.commissionPercent || 8) / 100)) || 0}</p>
               </div>
             </div>
 

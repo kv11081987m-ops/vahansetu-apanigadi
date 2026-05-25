@@ -143,6 +143,7 @@ const Home = () => {
   const activeRequestUnsubRef = useRef(null);
   const [showRating, setShowRating] = useState(false);
   const [userRating, setUserRating] = useState(0);
+  const [hoveredRating, setHoveredRating] = useState(0);
   const [completedDriverName, setCompletedDriverName] = useState(null);
   const [goodsType, setGoodsType] = useState('');
   const [goodsWeight, setGoodsWeight] = useState('');
@@ -637,7 +638,7 @@ const Home = () => {
   useEffect(() => {
     if (activeSidebarModal !== 'scheduled' || !user) return;
     startTransition(() => { setScheduledRidesLoading(true); });
-    getDocs(query(collection(db, 'ride_requests'), where('userId', '==', user.uid)))
+    getDocs(query(collection(db, 'ride_requests'), where('userId', '==', user.uid), limit(100)))
       .then(snap => {
         const now = Date.now();
         const rides = snap.docs
@@ -707,7 +708,7 @@ const Home = () => {
         timestamp: new Date()
       });
 
-      const driverEarning = Math.round(amount * 0.92);
+      const driverEarning = Math.round(amount * (1 - (config.commissionPercent || 8) / 100));
 
       if (method === 'cash') {
         // Cash: driver physically collected full amount.
@@ -2107,17 +2108,20 @@ const Home = () => {
               <p className="text-slate-500 font-medium mb-8">How was your journey with {completedDriverName || matchedDriver?.name || activeRide?.driverName || 'your driver'}?</p>
               
               <div className="flex justify-center gap-3 mb-10">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button 
-                    key={star}
-                    onMouseEnter={() => setUserRating(star)}
-                    onMouseLeave={() => setUserRating(0)}
-                    onClick={() => handleSubmitRating(star)}
-                    className={`transition-all duration-300 transform hover:scale-125 ${userRating >= star ? 'text-amber-500' : 'text-slate-200'}`}
-                  >
-                    <Star size={40} fill={userRating >= star ? "currentColor" : "none"} strokeWidth={2} />
-                  </button>
-                ))}
+                {[1, 2, 3, 4, 5].map((star) => {
+                  const active = (hoveredRating || userRating) >= star;
+                  return (
+                    <button
+                      key={star}
+                      onMouseEnter={() => setHoveredRating(star)}
+                      onMouseLeave={() => setHoveredRating(0)}
+                      onClick={() => { setUserRating(star); handleSubmitRating(star); }}
+                      className={`transition-all duration-300 transform hover:scale-125 active:scale-110 ${active ? 'text-amber-500' : 'text-slate-200'}`}
+                    >
+                      <Star size={40} fill={active ? 'currentColor' : 'none'} strokeWidth={2} />
+                    </button>
+                  );
+                })}
               </div>
 
               <button 
