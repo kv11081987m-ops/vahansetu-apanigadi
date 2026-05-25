@@ -1658,17 +1658,37 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     {newRequest.status === 'accepted' && newRequest.driverId === driverId && (
-                      <div className="flex gap-3">
-                        <input
-                          type="text" maxLength="4" placeholder="OTP"
-                          value={enteredOtp} onChange={(e) => setEnteredOtp(e.target.value)}
-                          className="flex-1 bg-slate-50 px-3 py-4 rounded-2xl text-center text-xl font-black tracking-[0.3em] outline-none border-2 border-slate-100 focus:border-blue-500 transition-all"
-                        />
-                        <button onClick={handleVerifyOtp} className="flex-[1.5] py-4 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">Start Trip</button>
+                      <div className="flex flex-col gap-3">
+                        <div className="flex gap-3">
+                          <input
+                            type="text" maxLength="4" placeholder="OTP"
+                            value={enteredOtp} onChange={(e) => setEnteredOtp(e.target.value)}
+                            className="flex-1 bg-slate-50 px-3 py-4 rounded-2xl text-center text-xl font-black tracking-[0.3em] outline-none border-2 border-slate-100 focus:border-blue-500 transition-all"
+                          />
+                          <button onClick={handleVerifyOtp} className="flex-[1.5] py-4 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">Start Trip</button>
+                        </div>
+                        {newRequest.userPhone && (
+                          <button
+                            onClick={() => window.location.href = `tel:${newRequest.userPhone}`}
+                            className="w-full py-3.5 bg-blue-600/20 text-blue-600 rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+                          >
+                            <Phone size={14} /> Call Passenger
+                          </button>
+                        )}
                       </div>
                     )}
                     {newRequest.status === 'started' && newRequest.driverId === driverId && (
-                      <button onClick={handleCompleteRide} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">Complete Journey</button>
+                      <div className="flex flex-col gap-3">
+                        <button onClick={handleCompleteRide} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">Complete Journey</button>
+                        {newRequest.userPhone && (
+                          <button
+                            onClick={() => window.location.href = `tel:${newRequest.userPhone}`}
+                            className="w-full py-3.5 bg-blue-600/20 text-blue-600 rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+                          >
+                            <Phone size={14} /> Call Passenger
+                          </button>
+                        )}
+                      </div>
                     )}
                     {newRequest.status === 'completed' && newRequest.driverId === driverId && driverFareBreakup && (
                       <div className="w-full bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col gap-3">

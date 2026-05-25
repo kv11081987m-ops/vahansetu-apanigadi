@@ -571,6 +571,7 @@ const Home = () => {
       driverId: 'broadcast',
       vehicleType: vType,
       userId: user.uid,
+      userPhone: userProfile?.phoneNumber || null,
       pickup,
       destination,
       fare: vType === 'battery_rickshaw' ? fare.savaari : fare.logistics,
