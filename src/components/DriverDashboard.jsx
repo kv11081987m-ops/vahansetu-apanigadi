@@ -1550,8 +1550,8 @@ const DriverDashboard = () => {
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            className="fixed left-4 right-4 z-20 max-w-lg mx-auto"
-            style={{ bottom: '7rem' }}
+            className="fixed left-4 right-4 z-20 max-w-lg mx-auto overflow-y-auto"
+            style={{ bottom: '7rem', maxHeight: 'calc(100dvh - 8rem)' }}
           >
             {isDriverCardMinimized ? (
               /* ── Minimized pill ── */
@@ -1651,8 +1651,10 @@ const DriverDashboard = () => {
                       <div className="flex flex-col gap-3">
                         <div className="flex gap-3">
                           <input
-                            type="text" maxLength="4" placeholder="OTP"
+                            type="text" inputMode="numeric" maxLength="4" placeholder="OTP"
+                            autoComplete="one-time-code"
                             value={enteredOtp} onChange={(e) => setEnteredOtp(e.target.value)}
+                            onFocus={(e) => setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300)}
                             className="flex-1 bg-slate-50 px-3 py-4 rounded-2xl text-center text-xl font-black tracking-[0.3em] outline-none border-2 border-slate-100 focus:border-blue-500 transition-all"
                           />
                           <button onClick={handleVerifyOtp} className="flex-[1.5] py-4 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">Start Trip</button>
