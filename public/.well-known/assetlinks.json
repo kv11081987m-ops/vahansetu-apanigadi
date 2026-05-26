@@ -3,6 +3,6 @@
   "target": {
     "namespace": "android_app",
     "package_name": "com.vahansetu.apnigadi",
-    "sha256_cert_fingerprints": ["D8:CA:4D:DD:3F:F1:DB:BF:8B:FA:38:39:84:2F:E7:37:3B:89:5E:98:F6:6F:B4:7D:6A:E4:AA:C4:03:A7:CC:2B"]
+    "sha256_cert_fingerprints": ["37:82:D1:9D:F4:21:5A:AB:5F:FE:6B:8C:C1:81:D3:47:09:D1:04:6E:97:FC:25:46:06:F3:1E:F8:A6:1C:8B:D1"]
   }
 }]
