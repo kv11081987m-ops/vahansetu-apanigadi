@@ -47,6 +47,31 @@
         { "fieldPath": "refereeId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "shared_rides",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "routeId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "availableSeats", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shared_rides",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "driverId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "shared_bookings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rideId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
