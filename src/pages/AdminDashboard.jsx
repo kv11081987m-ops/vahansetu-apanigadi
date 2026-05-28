@@ -31,7 +31,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
 import { QRCodeCanvas } from 'qrcode.react';
 import { db } from '../services/firebase';
-import { collection, query, onSnapshot, orderBy, limit, doc, updateDoc, addDoc, serverTimestamp, increment, setDoc, getDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, limit, doc, updateDoc, addDoc, serverTimestamp, increment, setDoc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 
 const AdminDashboard = () => {
@@ -80,9 +80,19 @@ const AdminDashboard = () => {
     referralReferrerReward: 20,
     referralRefereeReward: 25,
     referralCreditUsagePercent: 50,
+    sharedCommission: 10,
+    sharedMinPassengers: 1,
+    sharedWaitingMins: 5,
+    sharedOperatingStart: '07:00',
+    sharedOperatingEnd: '20:00',
   });
   const [configSaving, setConfigSaving] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
+  const [sharedRoutes, setSharedRoutes] = useState([]);
+  const [sharedRoutesLoading, setSharedRoutesLoading] = useState(true);
+  const [showAddRoute, setShowAddRoute] = useState(false);
+  const [editingRoute, setEditingRoute] = useState(null);
+  const [newRoute, setNewRoute] = useState({ name: '', stops: ['', ''], fares: [10], isActive: true });
   const [driverPrivateData, setDriverPrivateData] = useState({}); // driverId → { adminTempAccess }
   const [referrals, setReferrals] = useState([]);
   const [toast, setToast] = useState(null);
@@ -163,6 +173,15 @@ const AdminDashboard = () => {
       (snap) => setReferrals(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
 
+    // 7. Shared Routes Listener
+    const unsubSharedRoutes = onSnapshot(
+      collection(db, 'shared_routes'),
+      (snap) => {
+        setSharedRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setSharedRoutesLoading(false);
+      }
+    );
+
     return () => {
       unsubDrivers();
       unsubUsers();
@@ -170,6 +189,7 @@ const AdminDashboard = () => {
       unsubPayouts();
       unsubConfig();
       unsubReferrals();
+      unsubSharedRoutes();
     };
   }, []);
 
@@ -184,6 +204,41 @@ const AdminDashboard = () => {
     } finally {
       setConfigSaving(false);
     }
+  };
+
+  const handleAddRoute = async () => {
+    if (!newRoute.name || newRoute.stops.filter(s => s.trim()).length < 2) {
+      alert('Route naam aur kam se kam 2 stops zaroori hain');
+      return;
+    }
+    const cleanStops = newRoute.stops.filter(s => s.trim());
+    const cleanFares = cleanStops.slice(1).map((_, i) => newRoute.fares[i] || 20);
+    await addDoc(collection(db, 'shared_routes'), {
+      name: newRoute.name,
+      stops: cleanStops,
+      fares: cleanFares,
+      isActive: true,
+      createdAt: new Date().toISOString()
+    });
+    setNewRoute({ name: '', stops: ['', ''], fares: [10], isActive: true });
+    setShowAddRoute(false);
+  };
+
+  const handleToggleRoute = async (routeId, current) => {
+    await updateDoc(doc(db, 'shared_routes', routeId), { isActive: !current });
+  };
+
+  const handleDeleteRoute = async (routeId) => {
+    if (!window.confirm('Ye route delete karna chahte hain?')) return;
+    await deleteDoc(doc(db, 'shared_routes', routeId));
+  };
+
+  const handleAddStop = () => {
+    setNewRoute(prev => ({
+      ...prev,
+      stops: [...prev.stops, ''],
+      fares: [...prev.fares, 20]
+    }));
   };
 
   const UpiEditCell = ({ driverId, currentUpi }) => {
@@ -1586,6 +1641,153 @@ const AdminDashboard = () => {
                   Refer karo → Friend pehli ride le → Referrer +₹{platformConfig.referralReferrerReward} · Friend +₹{platformConfig.referralRefereeReward}
                 </div>
               </div>
+            </div>
+
+            {/* Shared Ride Settings */}
+            <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+              <h3 className="font-black text-white uppercase tracking-widest text-sm mb-6 flex items-center gap-3">
+                <MapIcon size={18} className="text-violet-400" /> Shared Ride Settings
+              </h3>
+
+              {/* Shared Settings inputs */}
+              <div className="grid grid-cols-2 gap-6 mb-8">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Commission (%)</span>
+                  <input type="number" min="0" max="50" value={platformConfig.sharedCommission}
+                    onChange={e => setPlatformConfig(p => ({ ...p, sharedCommission: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-violet-600 transition-all" />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Min Passengers (per booking)</span>
+                  <input type="number" min="1" max="10" value={platformConfig.sharedMinPassengers}
+                    onChange={e => setPlatformConfig(p => ({ ...p, sharedMinPassengers: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-violet-600 transition-all" />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Waiting Time (mins)</span>
+                  <input type="number" min="1" max="30" value={platformConfig.sharedWaitingMins}
+                    onChange={e => setPlatformConfig(p => ({ ...p, sharedWaitingMins: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-violet-600 transition-all" />
+                </label>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Operating Hours</span>
+                  <div className="flex items-center gap-2">
+                    <input type="time" value={platformConfig.sharedOperatingStart}
+                      onChange={e => setPlatformConfig(p => ({ ...p, sharedOperatingStart: e.target.value }))}
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-white font-bold outline-none focus:border-violet-600 transition-all" />
+                    <span className="text-slate-500 font-black text-sm">→</span>
+                    <input type="time" value={platformConfig.sharedOperatingEnd}
+                      onChange={e => setPlatformConfig(p => ({ ...p, sharedOperatingEnd: e.target.value }))}
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-white font-bold outline-none focus:border-violet-600 transition-all" />
+                  </div>
+                </div>
+              </div>
+              <button onClick={handleSavePlatformConfig} disabled={configSaving}
+                className="mb-8 px-6 py-3 bg-violet-600 text-white rounded-xl font-black tracking-widest text-[11px] uppercase hover:bg-violet-500 transition-all disabled:opacity-50">
+                {configSaving ? 'Saving...' : 'Save Shared Settings'}
+              </button>
+
+              {/* Routes subsection */}
+              <div className="flex items-center justify-between mb-5">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shared Routes</p>
+                <button onClick={() => setShowAddRoute(v => !v)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-violet-500 transition-all">
+                  <Plus size={12} /> Add Route
+                </button>
+              </div>
+
+              {/* Add Route Form */}
+              <AnimatePresence>
+                {showAddRoute && (
+                  <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                    className="bg-slate-900 rounded-2xl p-5 border border-violet-500/30 mb-5 flex flex-col gap-4">
+                    <label className="flex flex-col gap-1.5">
+                      <span className="text-xs font-bold text-slate-400">Route Name</span>
+                      <input type="text" placeholder="e.g. Railway Station → Medical College"
+                        value={newRoute.name}
+                        onChange={e => setNewRoute(p => ({ ...p, name: e.target.value }))}
+                        className="bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-violet-600 transition-all" />
+                    </label>
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs font-bold text-slate-400">Stops &amp; Fares</span>
+                      {newRoute.stops.map((stop, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-500 w-5 text-right">{idx + 1}.</span>
+                          <input type="text" placeholder={`Stop ${idx + 1}`}
+                            value={stop}
+                            onChange={e => setNewRoute(p => {
+                              const stops = [...p.stops]; stops[idx] = e.target.value; return { ...p, stops };
+                            })}
+                            className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-bold outline-none focus:border-violet-600 transition-all" />
+                          {idx > 0 && (
+                            <input type="number" min="1" placeholder="₹"
+                              value={newRoute.fares[idx - 1] || ''}
+                              onChange={e => setNewRoute(p => {
+                                const fares = [...p.fares]; fares[idx - 1] = Number(e.target.value); return { ...p, fares };
+                              })}
+                              className="w-20 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-bold outline-none focus:border-violet-600 transition-all" />
+                          )}
+                        </div>
+                      ))}
+                      <button onClick={handleAddStop}
+                        className="self-start text-[10px] font-black text-violet-400 uppercase tracking-widest flex items-center gap-1 mt-1 hover:text-violet-300">
+                        <Plus size={10} /> Add Stop
+                      </button>
+                    </div>
+                    <div className="flex gap-3">
+                      <button onClick={handleAddRoute}
+                        className="flex-1 py-3 bg-violet-600 text-white rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-violet-500 transition-all">
+                        Save Route
+                      </button>
+                      <button onClick={() => setShowAddRoute(false)}
+                        className="px-5 py-3 bg-slate-800 text-slate-400 rounded-xl font-black text-[11px] uppercase tracking-widest hover:bg-slate-700 transition-all">
+                        Cancel
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Routes List */}
+              {sharedRoutesLoading ? (
+                <p className="text-xs text-slate-500 font-bold text-center py-6">Loading routes...</p>
+              ) : sharedRoutes.length === 0 ? (
+                <div className="text-center py-8 text-slate-600 font-bold text-sm">
+                  Koi route nahi hai. "Add Route" se pehla route banao.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {sharedRoutes.map(route => (
+                    <div key={route.id} className="bg-slate-900 rounded-2xl p-5 border border-slate-800 flex flex-col gap-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col gap-1 flex-1">
+                          <p className="text-sm font-black text-white leading-snug">{route.name}</p>
+                          <p className="text-[11px] text-slate-400 font-bold">
+                            {(route.stops || []).join(' → ')}
+                          </p>
+                          <p className="text-[11px] text-violet-400 font-black">
+                            Fares: {(route.fares || []).map(f => `₹${f}`).join(' / ')}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button onClick={() => handleToggleRoute(route.id, route.isActive)}
+                            className={`px-3 py-1.5 rounded-lg font-black text-[9px] uppercase tracking-widest transition-all ${
+                              route.isActive
+                                ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/40'
+                                : 'bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/40'
+                            }`}>
+                            {route.isActive ? 'Active' : 'Inactive'}
+                          </button>
+                          <button onClick={() => handleDeleteRoute(route.id)}
+                            className="p-1.5 rounded-lg bg-red-600/10 text-red-500 border border-red-500/20 hover:bg-red-600 hover:text-white transition-all">
+                            <X size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Save Button */}

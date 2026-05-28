@@ -228,6 +228,14 @@ service cloud.firestore {
     }
 
 
+    // ── SHARED ROUTES ─────────────────────────────────────────────────────────
+    // All logged-in users can read routes (needed for booking); only admin writes.
+    match /shared_routes/{routeId} {
+      allow read: if isLoggedIn();
+      allow write: if isAdmin();
+    }
+
+
     // ── REFERRALS ─────────────────────────────────────────────────────────────
     match /referrals/{referralId} {
       allow read: if isLoggedIn() && (
