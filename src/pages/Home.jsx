@@ -552,8 +552,10 @@ const Home = () => {
     const boardingIdx = route.stops.indexOf(boardingStop);
     const dropIdx = route.stops.indexOf(dropStop);
     if (boardingIdx === -1 || dropIdx === -1 || dropIdx <= boardingIdx) return 0;
-    // Flat fare per drop stop — fares[dropIdx-1] is the fixed fare for that stop
-    return (route.fares || [])[dropIdx - 1] || 0;
+    // Gap-based tier: 1 stop=fares[0], 2 stops=fares[1], 3+ stops=fares[last]
+    const gap = dropIdx - boardingIdx;
+    const fares = route.fares || [];
+    return fares[Math.min(gap - 1, fares.length - 1)] || 0;
   };
 
   const handleSharedBooking = async () => {
