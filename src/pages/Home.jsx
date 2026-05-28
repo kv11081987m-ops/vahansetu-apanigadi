@@ -552,9 +552,8 @@ const Home = () => {
     const boardingIdx = route.stops.indexOf(boardingStop);
     const dropIdx = route.stops.indexOf(dropStop);
     if (boardingIdx === -1 || dropIdx === -1 || dropIdx <= boardingIdx) return 0;
-    if (dropIdx === route.stops.length - 1) return 20;
-    if (dropIdx === boardingIdx + 1) return 10;
-    return 15;
+    // Sum segment fares from boarding to drop (fares[i] = stops[i] → stops[i+1])
+    return (route.fares || []).slice(boardingIdx, dropIdx).reduce((sum, f) => sum + (f || 0), 0);
   };
 
   const handleSharedBooking = async () => {
