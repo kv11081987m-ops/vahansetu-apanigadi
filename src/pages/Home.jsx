@@ -31,7 +31,7 @@ import {
   Copy,
   Users
 } from 'lucide-react';
-import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction, arrayUnion } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -202,6 +202,14 @@ const Home = () => {
   const [cancelReason, setCancelReason] = useState('');
   const [isPaymentLoading, setIsPaymentLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [rideMode, setRideMode] = useState('private');
+  const [sharedRoutes, setSharedRoutes] = useState([]);
+  const [selectedRoute, setSelectedRoute] = useState(null);
+  const [selectedBoardingStop, setSelectedBoardingStop] = useState(null);
+  const [selectedDropStop, setSelectedDropStop] = useState(null);
+  const [sharedFare, setSharedFare] = useState(0);
+  const [sharedBookingId, setSharedBookingId] = useState(null);
+  const [sharedBookingStatus, setSharedBookingStatus] = useState('idle');
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
@@ -520,6 +528,97 @@ const Home = () => {
       isBookingRef.current = false;
     }
   };
+
+  // ── Shared Ride ───────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const unsubRoutes = onSnapshot(
+      query(collection(db, 'shared_routes'), where('isActive', '==', true)),
+      (snap) => setSharedRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+    return () => unsubRoutes();
+  }, []);
+
+  useEffect(() => {
+    if (!sharedBookingId) return;
+    const unsub = onSnapshot(doc(db, 'shared_bookings', sharedBookingId), (snap) => {
+      if (!snap.exists()) return;
+      setSharedBookingStatus(snap.data().status);
+    });
+    return () => unsub();
+  }, [sharedBookingId]);
+
+  const calculateSharedFare = (route, boardingStop, dropStop) => {
+    const boardingIdx = route.stops.indexOf(boardingStop);
+    const dropIdx = route.stops.indexOf(dropStop);
+    if (boardingIdx === -1 || dropIdx === -1 || dropIdx <= boardingIdx) return 0;
+    if (dropIdx === route.stops.length - 1) return 20;
+    if (dropIdx === boardingIdx + 1) return 10;
+    return 15;
+  };
+
+  const handleSharedBooking = async () => {
+    if (!selectedRoute || !selectedBoardingStop || !selectedDropStop) return;
+    setSharedBookingStatus('searching');
+    try {
+      const ridesSnap = await getDocs(
+        query(
+          collection(db, 'shared_rides'),
+          where('routeId', '==', selectedRoute.id),
+          where('status', '==', 'waiting'),
+          where('availableSeats', '>', 0)
+        )
+      );
+      let rideId = null;
+      if (!ridesSnap.empty) {
+        rideId = ridesSnap.docs[0].id;
+        await updateDoc(doc(db, 'shared_rides', rideId), {
+          availableSeats: increment(-1),
+          passengers: arrayUnion(user.uid)
+        });
+      } else {
+        const newRide = await addDoc(collection(db, 'shared_rides'), {
+          routeId: selectedRoute.id,
+          routeName: selectedRoute.name,
+          status: 'waiting',
+          availableSeats: 3,
+          passengers: [user.uid],
+          driverId: null,
+          createdAt: new Date().toISOString()
+        });
+        rideId = newRide.id;
+      }
+      const booking = await addDoc(collection(db, 'shared_bookings'), {
+        passengerId: user.uid,
+        passengerName: userProfile?.name || 'Passenger',
+        rideId,
+        routeId: selectedRoute.id,
+        routeName: selectedRoute.name,
+        boardingStop: selectedBoardingStop,
+        dropStop: selectedDropStop,
+        fare: sharedFare,
+        status: 'booked',
+        createdAt: new Date().toISOString()
+      });
+      setSharedBookingId(booking.id);
+      setSharedBookingStatus('booked');
+    } catch (err) {
+      console.error('Shared booking error:', err);
+      setSharedBookingStatus('idle');
+      showToast('Booking nahi ho saki. Dobara try karein.', 'error');
+    }
+  };
+
+  const handleSharedReset = () => {
+    setSharedBookingStatus('idle');
+    setSharedBookingId(null);
+    setSelectedRoute(null);
+    setSelectedBoardingStop(null);
+    setSelectedDropStop(null);
+    setSharedFare(0);
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   const findAndAssignDriver = async (bookingId, vType, rideOtp, logisticsData = {}) => {
     const RADII = [3, 5, 7];
@@ -1950,8 +2049,8 @@ const Home = () => {
         )}
       </AnimatePresence>
 
-      {/* Compact search card — idle only */}
-      {bookingStatus === 'idle' && (
+      {/* Compact search card — idle + private mode only */}
+      {bookingStatus === 'idle' && rideMode === 'private' && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -2017,69 +2116,222 @@ const Home = () => {
         <div className="absolute bottom-0 left-0 right-0 z-20 bg-white rounded-t-[2.5rem] shadow-[0_-20px_50px_rgba(0,0,0,0.12)] px-5 pt-5 pb-8">
           <div className="w-10 h-1 bg-slate-100 rounded-full mx-auto mb-4" />
 
-          <div className="flex gap-3 mb-4">
-            <button
-              onClick={() => setService('savaari')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${
-                service === 'savaari' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'bg-slate-50 text-slate-500 border border-slate-100'
-              }`}
-            >
-              <Car size={16} /> Savaari{fare.savaari ? ` ₹${fare.savaari}` : ''}
+          {/* Ride Mode Toggle */}
+          <div className="flex gap-1 mb-4 bg-slate-100 p-1 rounded-2xl">
+            <button onClick={() => setRideMode('private')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${rideMode === 'private' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-500'}`}>
+              🚗 Private
             </button>
-            <button
-              onClick={() => setService('logistics')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${
-                service === 'logistics' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25' : 'bg-slate-50 text-slate-500 border border-slate-100'
-              }`}
-            >
-              <Truck size={16} /> Logistics{fare.logistics ? ` ₹${fare.logistics}` : ''}
+            <button onClick={() => { setRideMode('shared'); handleSharedReset(); }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${rideMode === 'shared' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-500'}`}>
+              🛺 Shared
             </button>
           </div>
 
-          {service === 'logistics' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex gap-3 mb-4 overflow-hidden">
-              <div className="flex-1 bg-slate-50 rounded-2xl px-3 py-2.5 flex items-center gap-2 border border-slate-100">
-                <Package size={14} className="text-emerald-500 shrink-0" />
-                <input type="text" placeholder="Goods type" className="bg-transparent text-xs font-bold outline-none w-full" value={goodsType} onChange={(e) => setGoodsType(e.target.value)} />
-              </div>
-              <div className="flex-1 bg-slate-50 rounded-2xl px-3 py-2.5 flex items-center gap-2 border border-slate-100">
-                <Scale size={14} className="text-emerald-500 shrink-0" />
-                <input type="text" placeholder="Weight (kg)" className="bg-transparent text-xs font-bold outline-none w-full" value={goodsWeight} onChange={(e) => setGoodsWeight(e.target.value)} />
-              </div>
-            </motion.div>
-          )}
-
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Clock size={14} className={isScheduled ? 'text-amber-500' : 'text-slate-300'} />
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Schedule for Later</span>
+          {/* Private Ride Content */}
+          {rideMode === 'private' && (<>
+            <div className="flex gap-3 mb-4">
+              <button
+                onClick={() => setService('savaari')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                  service === 'savaari' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'bg-slate-50 text-slate-500 border border-slate-100'
+                }`}
+              >
+                <Car size={16} /> Savaari{fare.savaari ? ` ₹${fare.savaari}` : ''}
+              </button>
+              <button
+                onClick={() => setService('logistics')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                  service === 'logistics' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25' : 'bg-slate-50 text-slate-500 border border-slate-100'
+                }`}
+              >
+                <Truck size={16} /> Logistics{fare.logistics ? ` ₹${fare.logistics}` : ''}
+              </button>
             </div>
-            <button onClick={() => setIsScheduled(s => !s)} className={`w-10 h-5 rounded-full transition-all relative ${isScheduled ? 'bg-amber-500' : 'bg-slate-200'}`}>
-              <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${isScheduled ? 'left-5' : 'left-0.5'}`} />
+
+            {service === 'logistics' && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="flex gap-3 mb-4 overflow-hidden">
+                <div className="flex-1 bg-slate-50 rounded-2xl px-3 py-2.5 flex items-center gap-2 border border-slate-100">
+                  <Package size={14} className="text-emerald-500 shrink-0" />
+                  <input type="text" placeholder="Goods type" className="bg-transparent text-xs font-bold outline-none w-full" value={goodsType} onChange={(e) => setGoodsType(e.target.value)} />
+                </div>
+                <div className="flex-1 bg-slate-50 rounded-2xl px-3 py-2.5 flex items-center gap-2 border border-slate-100">
+                  <Scale size={14} className="text-emerald-500 shrink-0" />
+                  <input type="text" placeholder="Weight (kg)" className="bg-transparent text-xs font-bold outline-none w-full" value={goodsWeight} onChange={(e) => setGoodsWeight(e.target.value)} />
+                </div>
+              </motion.div>
+            )}
+
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Clock size={14} className={isScheduled ? 'text-amber-500' : 'text-slate-300'} />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Schedule for Later</span>
+              </div>
+              <button onClick={() => setIsScheduled(s => !s)} className={`w-10 h-5 rounded-full transition-all relative ${isScheduled ? 'bg-amber-500' : 'bg-slate-200'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${isScheduled ? 'left-5' : 'left-0.5'}`} />
+              </button>
+            </div>
+
+            {isScheduled && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mb-4 overflow-hidden">
+                <input type="datetime-local" min={scheduleMin} max={scheduleMax} value={scheduledDateTime} onChange={e => setScheduledDateTime(e.target.value)} className="w-full bg-amber-50 border-2 border-amber-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:border-amber-400 transition-all" />
+              </motion.div>
+            )}
+
+            {pickup && destination && distance && (
+              <div className="flex items-center justify-between mb-3 px-1">
+                <span className="text-xs font-bold text-slate-400">{distance} km</span>
+                <span className="text-lg font-black text-slate-800">₹{service === 'savaari' ? fare.savaari : fare.logistics}</span>
+              </div>
+            )}
+
+            <button
+              onClick={handleConfirmBooking}
+              disabled={!pickup || !destination || (isScheduled && !scheduledDateTime)}
+              className={`w-full py-4 text-white rounded-[2rem] font-black tracking-[0.2em] text-[10px] shadow-2xl disabled:opacity-20 transition-all ${isScheduled ? 'bg-amber-500 shadow-amber-500/30' : 'bg-slate-900'}`}
+            >
+              {isScheduled ? `📅 SCHEDULE ${service.toUpperCase()}` : `CONFIRM ${service.toUpperCase()}`}
             </button>
-          </div>
+          </>)}
 
-          {isScheduled && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mb-4 overflow-hidden">
-              <input type="datetime-local" min={scheduleMin} max={scheduleMax} value={scheduledDateTime} onChange={e => setScheduledDateTime(e.target.value)} className="w-full bg-amber-50 border-2 border-amber-200 rounded-2xl px-4 py-3 text-sm font-bold text-slate-800 outline-none focus:border-amber-400 transition-all" />
-            </motion.div>
-          )}
+          {/* Shared Ride Content */}
+          {rideMode === 'shared' && (<>
+            {sharedBookingStatus === 'idle' && (<>
+              <div className="mb-3">
+                <p className="text-base font-black text-slate-800">Shared Ride Book Karo</p>
+                <p className="text-[11px] text-slate-400 font-bold">Sasta aur suvidhajanakl</p>
+              </div>
+              {sharedRoutes.length === 0 ? (
+                <p className="text-center text-slate-400 text-sm font-bold py-4">Abhi koi active route nahi hai.</p>
+              ) : (
+                <div className="flex flex-col gap-3 max-h-52 overflow-y-auto scrollbar-hide">
+                  {sharedRoutes.map(route => (
+                    <div key={route.id} className="flex items-center justify-between bg-slate-50 rounded-2xl px-4 py-3 border border-slate-100">
+                      <div className="flex-1 min-w-0 mr-3">
+                        <p className="text-sm font-black text-slate-800 leading-snug">{route.name}</p>
+                        <p className="text-[10px] text-slate-400 font-bold truncate">{(route.stops || []).join(' → ')}</p>
+                        <p className="text-[10px] font-black text-blue-500 mt-0.5">₹{Math.min(...(route.fares || [10]))} – ₹{Math.max(...(route.fares || [20]))}</p>
+                      </div>
+                      <button onClick={() => { setSelectedRoute(route); setSharedBookingStatus('selecting_stops'); }}
+                        className="px-3 py-2 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shrink-0">
+                        Select
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>)}
 
-          {pickup && destination && distance && (
-            <div className="flex items-center justify-between mb-3 px-1">
-              <span className="text-xs font-bold text-slate-400">{distance} km</span>
-              <span className="text-lg font-black text-slate-800">₹{service === 'savaari' ? fare.savaari : fare.logistics}</span>
-            </div>
-          )}
+            {sharedBookingStatus === 'selecting_stops' && selectedRoute && (<>
+              <p className="text-sm font-black text-slate-800 mb-3">{selectedRoute.name}</p>
+              <div className="flex flex-col gap-3 mb-3">
+                <div>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Boarding Stop</p>
+                  <select value={selectedBoardingStop || ''}
+                    onChange={e => { setSelectedBoardingStop(e.target.value); setSelectedDropStop(null); setSharedFare(0); }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none">
+                    <option value="">-- Chunein --</option>
+                    {(selectedRoute.stops || []).slice(0, -1).map(stop => (
+                      <option key={stop} value={stop}>{stop}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Drop Stop</p>
+                  <select value={selectedDropStop || ''}
+                    onChange={e => {
+                      const drop = e.target.value;
+                      setSelectedDropStop(drop);
+                      setSharedFare(drop && selectedBoardingStop ? calculateSharedFare(selectedRoute, selectedBoardingStop, drop) : 0);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none"
+                    disabled={!selectedBoardingStop}>
+                    <option value="">-- Chunein --</option>
+                    {selectedBoardingStop && (selectedRoute.stops || [])
+                      .slice((selectedRoute.stops || []).indexOf(selectedBoardingStop) + 1)
+                      .map(stop => (
+                        <option key={stop} value={stop}>{stop}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+              {sharedFare > 0 && (
+                <div className="bg-blue-50 rounded-xl px-4 py-2.5 mb-3 text-center">
+                  <p className="text-xs font-bold text-blue-500">Aapka Fare</p>
+                  <p className="text-2xl font-black text-blue-700">₹{sharedFare}</p>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button onClick={() => { setSharedBookingStatus('idle'); setSelectedRoute(null); setSelectedBoardingStop(null); setSelectedDropStop(null); setSharedFare(0); }}
+                  className="px-5 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest">
+                  Back
+                </button>
+                <button onClick={handleSharedBooking}
+                  disabled={!selectedBoardingStop || !selectedDropStop || sharedFare === 0}
+                  className="flex-1 py-3 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-30">
+                  Book Seat
+                </button>
+              </div>
+            </>)}
 
-          <button
-            onClick={handleConfirmBooking}
-            disabled={!pickup || !destination || (isScheduled && !scheduledDateTime)}
-            className={`w-full py-4 text-white rounded-[2rem] font-black tracking-[0.2em] text-[10px] shadow-2xl disabled:opacity-20 transition-all ${isScheduled ? 'bg-amber-500 shadow-amber-500/30' : 'bg-slate-900'}`}
-          >
-            {isScheduled ? `📅 SCHEDULE ${service.toUpperCase()}` : `CONFIRM ${service.toUpperCase()}`}
-          </button>
+            {sharedBookingStatus === 'searching' && (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                <p className="font-black text-slate-700 text-sm">Driver dhundha ja raha hai...</p>
+                <p className="text-xs text-emerald-600 font-bold">Aapki seat reserved hai!</p>
+              </div>
+            )}
+          </>)}
         </div>
+      )}
+
+      {/* Shared Ride Status Panel */}
+      {rideMode === 'shared' && ['booked', 'driver_assigned', 'onboard', 'done'].includes(sharedBookingStatus) && (
+        <motion.div initial={{ y: '100%' }} animate={{ y: 0 }}
+          className="absolute bottom-0 left-0 right-0 z-20 bg-white rounded-t-[3.5rem] shadow-[0_-30px_60px_rgba(0,0,0,0.1)] p-8 pt-6">
+          <div className="w-14 h-1.5 bg-slate-100 rounded-full mx-auto mb-5" />
+
+          {(sharedBookingStatus === 'booked' || sharedBookingStatus === 'driver_assigned') && (
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-3xl">✅</div>
+              <div>
+                <h3 className="text-xl font-black text-slate-800">Seat Confirmed!</h3>
+                <p className="text-sm text-slate-500 font-bold mt-1">{selectedRoute?.name}</p>
+              </div>
+              <div className="w-full bg-slate-50 rounded-2xl p-4 flex flex-col gap-2 text-left">
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Boarding</span><span className="text-sm font-black text-slate-700">{selectedBoardingStop}</span></div>
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Drop</span><span className="text-sm font-black text-slate-700">{selectedDropStop}</span></div>
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Fare</span><span className="text-sm font-black text-blue-600">₹{sharedFare}</span></div>
+              </div>
+              <p className="text-xs text-slate-400 font-bold">Driver aapko pickup karega</p>
+              <p className="text-[10px] text-slate-300 font-bold">💵 Cash driver ko dein</p>
+            </div>
+          )}
+
+          {sharedBookingStatus === 'onboard' && (
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div className="text-5xl">🛺</div>
+              <h3 className="text-xl font-black text-slate-800">Aap Rickshaw Mein Hain!</h3>
+              <p className="text-sm text-slate-500 font-bold">Driver aapko drop karega</p>
+              <div className="bg-blue-50 rounded-2xl px-6 py-3">
+                <p className="text-xs font-bold text-blue-400">Fare reminder</p>
+                <p className="text-2xl font-black text-blue-700">₹{sharedFare}</p>
+              </div>
+            </div>
+          )}
+
+          {sharedBookingStatus === 'done' && (
+            <div className="flex flex-col items-center gap-4 text-center">
+              <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-3xl">✅</div>
+              <h3 className="text-xl font-black text-slate-800">Aap Pahunch Gaye!</h3>
+              <p className="text-sm text-slate-500 font-bold">Fare: ₹{sharedFare} — Cash driver ko dein</p>
+              <button onClick={handleSharedReset}
+                className="w-full py-4 bg-slate-900 text-white rounded-[2rem] font-black tracking-widest text-[10px] uppercase">
+                Naya Booking
+              </button>
+            </div>
+          )}
+        </motion.div>
       )}
 
       {bookingStatus !== 'idle' && (

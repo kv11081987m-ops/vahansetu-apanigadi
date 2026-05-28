@@ -236,6 +236,34 @@ service cloud.firestore {
     }
 
 
+    // ── SHARED RIDES ──────────────────────────────────────────────────────────
+    // Drivers and passengers read; customer creates new ride; driver accepts.
+    match /shared_rides/{rideId} {
+      allow read: if isLoggedIn();
+      allow create: if isCustomer();
+      allow update: if isCustomer() || isDriver() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+
+    // ── SHARED BOOKINGS ───────────────────────────────────────────────────────
+    // Each booking belongs to a passenger; driver reads to show passenger list.
+    match /shared_bookings/{bookingId} {
+      allow read: if isLoggedIn() && (
+        resource.data.passengerId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid ||
+        isAdmin()
+      );
+      allow read: if isDriver();
+      allow create: if isCustomer()
+        && request.resource.data.passengerId == request.auth.uid;
+      allow update: if isCustomer() && resource.data.passengerId == request.auth.uid
+        || isDriver()
+        || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+
     // ── REFERRALS ─────────────────────────────────────────────────────────────
     match /referrals/{referralId} {
       allow read: if isLoggedIn() && (

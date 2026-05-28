@@ -585,6 +585,10 @@ const DriverDashboard = () => {
   });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isOnline, setIsOnline] = useState(false);
+  const [driverMode, setDriverMode] = useState('private');
+  const [sharedRideRequests, setSharedRideRequests] = useState([]);
+  const [activeSharedRide, setActiveSharedRide] = useState(null);
+  const [sharedPassengers, setSharedPassengers] = useState([]);
   const [profile, setProfile] = useState(null);
   const [driverGpsLocation, setDriverGpsLocation] = useState(null);
   const [driverHeading, setDriverHeading] = useState(0);
@@ -966,6 +970,78 @@ const DriverDashboard = () => {
     await updateDoc(doc(db, 'drivers', driverId), { isOnline: newStatus });
     setIsOnline(newStatus);
   };
+
+  // ── Shared Ride ───────────────────────────────────────────────────────────
+
+  const handleToggleDriverMode = async (mode) => {
+    setDriverMode(mode);
+    if (driverId) await updateDoc(doc(db, 'drivers', driverId), { rideMode: mode });
+  };
+
+  useEffect(() => {
+    if (driverMode !== 'shared' || !isOnline || !driverId) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'shared_rides'), where('status', '==', 'waiting'), where('driverId', '==', null)),
+      (snap) => setSharedRideRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+    return () => unsub();
+  }, [driverMode, isOnline, driverId]);
+
+  useEffect(() => {
+    if (!activeSharedRide?.id) return;
+    const unsub = onSnapshot(
+      query(collection(db, 'shared_bookings'), where('rideId', '==', activeSharedRide.id)),
+      (snap) => setSharedPassengers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+    return () => unsub();
+  }, [activeSharedRide?.id]);
+
+  const handleAcceptSharedRide = async (ride) => {
+    await updateDoc(doc(db, 'shared_rides', ride.id), {
+      driverId: driverId,
+      status: 'accepted',
+      acceptedAt: new Date().toISOString()
+    });
+    const bookingsSnap = await getDocs(
+      query(collection(db, 'shared_bookings'), where('rideId', '==', ride.id), where('status', '==', 'booked'))
+    );
+    await Promise.all(bookingsSnap.docs.map(b =>
+      updateDoc(doc(db, 'shared_bookings', b.id), { status: 'driver_assigned', driverId })
+    ));
+    setActiveSharedRide(ride);
+    setSharedRideRequests([]);
+  };
+
+  const handlePickupPassenger = async (bookingId) => {
+    await updateDoc(doc(db, 'shared_bookings', bookingId), { status: 'onboard' });
+  };
+
+  const handleDropPassenger = async (bookingId, fare) => {
+    await updateDoc(doc(db, 'shared_bookings', bookingId), { status: 'done' });
+    const commission = fare * 0.10;
+    const driverEarning = fare - commission;
+    await updateDoc(doc(db, 'drivers', driverId), {
+      walletBalance: increment(-commission),
+      totalEarnings: increment(fare)
+    });
+    await addDoc(collection(db, 'wallet_transactions'), {
+      driverId,
+      type: 'shared_ride_earning',
+      amount: driverEarning,
+      fare,
+      commission,
+      createdAt: new Date().toISOString()
+    });
+  };
+
+  const handleCompleteSharedTrip = async () => {
+    if (!activeSharedRide?.id) return;
+    await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), { status: 'completed' });
+    setActiveSharedRide(null);
+    setSharedPassengers([]);
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Wallet zone: normal >= -50, restricted -50 to -100, blocked < -100
   const walletBalance = profile?.walletBalance ?? 0;
@@ -1383,6 +1459,22 @@ const DriverDashboard = () => {
         </div>
       </div>
 
+      {/* Ride Mode Toggle — only when online */}
+      {isOnline && (
+        <div className="fixed top-[4.5rem] left-3 right-3 z-30">
+          <div className="flex gap-1 bg-white/90 backdrop-blur-md p-1 rounded-2xl shadow-lg border border-white/20">
+            <button onClick={() => handleToggleDriverMode('private')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${driverMode === 'private' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-500'}`}>
+              🚗 Private
+            </button>
+            <button onClick={() => handleToggleDriverMode('shared')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${driverMode === 'shared' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-500'}`}>
+              🛺 Shared
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Police Verification Countdown Banner */}
       {(() => {
         const deadline = privateProfile?.policeVerificationDeadline || profile?.policeVerificationDeadline;
@@ -1542,6 +1634,86 @@ const DriverDashboard = () => {
           <Navigation size={20} />
         </button>
       </div>
+
+      {/* Shared Ride Panel */}
+      {driverMode === 'shared' && isOnline && (
+        <div className="fixed left-4 right-4 z-20 max-w-lg mx-auto" style={{ bottom: '7rem' }}>
+          {!activeSharedRide ? (
+            <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden">
+              <div className="bg-blue-600 px-5 py-3">
+                <p className="text-white font-black text-sm">🛺 Shared Ride Requests</p>
+              </div>
+              <div className="p-4 flex flex-col gap-3 max-h-72 overflow-y-auto">
+                {sharedRideRequests.length === 0 ? (
+                  <p className="text-center text-slate-400 text-sm font-bold py-4">Abhi koi shared ride request nahi hai.</p>
+                ) : (
+                  sharedRideRequests.map(ride => (
+                    <div key={ride.id} className="flex items-center justify-between bg-slate-50 rounded-2xl px-4 py-3 border border-slate-100">
+                      <div>
+                        <p className="text-sm font-black text-slate-800">{ride.routeName}</p>
+                        <p className="text-xs text-slate-400 font-bold">{(ride.passengers || []).length} log wait kar rahe hain</p>
+                      </div>
+                      <button onClick={() => handleAcceptSharedRide(ride)}
+                        className="px-4 py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
+                        Accept Route
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden max-h-[70vh] flex flex-col">
+              <div className="bg-blue-600 px-5 py-3 shrink-0">
+                <p className="text-white font-black text-sm">{activeSharedRide.routeName}</p>
+                <p className="text-blue-200 text-[10px] font-bold uppercase tracking-widest">Active Shared Trip</p>
+              </div>
+              <div className="p-4 flex flex-col gap-3 overflow-y-auto flex-1">
+                {sharedPassengers.length === 0 ? (
+                  <p className="text-center text-slate-400 text-sm font-bold py-4">Passengers load ho rahe hain...</p>
+                ) : (
+                  sharedPassengers.map(p => (
+                    <div key={p.id} className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <p className="text-sm font-black text-slate-800">{p.passengerName}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">Boarding: {p.boardingStop} → Drop: {p.dropStop}</p>
+                          <p className="text-sm font-black text-blue-600">₹{p.fare}</p>
+                        </div>
+                        <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
+                          p.status === 'onboard' ? 'bg-emerald-100 text-emerald-600' :
+                          p.status === 'done' ? 'bg-slate-200 text-slate-500' :
+                          'bg-amber-100 text-amber-600'
+                        }`}>{p.status === 'driver_assigned' ? 'Waiting' : p.status}</span>
+                      </div>
+                      {p.status === 'driver_assigned' && (
+                        <button onClick={() => handlePickupPassenger(p.id)}
+                          className="w-full py-2 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
+                          Pickup Kiya ✓
+                        </button>
+                      )}
+                      {p.status === 'onboard' && (
+                        <button onClick={() => handleDropPassenger(p.id, p.fare)}
+                          className="w-full py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
+                          Drop Kiya ✓
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+              {sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done') && (
+                <div className="p-4 shrink-0 border-t border-slate-100">
+                  <button onClick={handleCompleteSharedTrip}
+                    className="w-full py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest">
+                    Trip Complete ✓
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Active Ride Overlay - Compact Floating Card */}
       <AnimatePresence>
