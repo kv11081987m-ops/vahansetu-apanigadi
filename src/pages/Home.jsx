@@ -208,6 +208,7 @@ const Home = () => {
   const [selectedBoardingStop, setSelectedBoardingStop] = useState(null);
   const [selectedDropStop, setSelectedDropStop] = useState(null);
   const [sharedFare, setSharedFare] = useState(0);
+  const [selectedSeats, setSelectedSeats] = useState(1);
   const [sharedBookingId, setSharedBookingId] = useState(null);
   const [sharedBookingStatus, setSharedBookingStatus] = useState('idle');
   const showToast = useCallback((message, type = 'info') => {
@@ -572,9 +573,16 @@ const Home = () => {
       );
       let rideId = null;
       if (!ridesSnap.empty) {
-        rideId = ridesSnap.docs[0].id;
+        const existingRide = ridesSnap.docs[0];
+        const availableSeats = existingRide.data().availableSeats || 0;
+        if (selectedSeats > availableSeats) {
+          alert('Itni seats available nahi hain! Sirf ' + availableSeats + ' seat bachi hai.');
+          setSharedBookingStatus('selecting_stops');
+          return;
+        }
+        rideId = existingRide.id;
         await updateDoc(doc(db, 'shared_rides', rideId), {
-          availableSeats: increment(-1),
+          availableSeats: increment(-selectedSeats),
           passengers: arrayUnion(user.uid)
         });
       } else {
@@ -582,7 +590,7 @@ const Home = () => {
           routeId: selectedRoute.id,
           routeName: selectedRoute.name,
           status: 'waiting',
-          availableSeats: 3,
+          availableSeats: 4 - selectedSeats,
           passengers: [user.uid],
           driverId: null,
           createdAt: new Date().toISOString()
@@ -597,7 +605,8 @@ const Home = () => {
         routeName: selectedRoute.name,
         boardingStop: selectedBoardingStop,
         dropStop: selectedDropStop,
-        fare: sharedFare,
+        seats: selectedSeats,
+        fare: sharedFare * selectedSeats,
         status: 'booked',
         createdAt: new Date().toISOString()
       });
@@ -617,6 +626,7 @@ const Home = () => {
     setSelectedBoardingStop(null);
     setSelectedDropStop(null);
     setSharedFare(0);
+    setSelectedSeats(1);
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2256,21 +2266,33 @@ const Home = () => {
                   </select>
                 </div>
               </div>
-              {sharedFare > 0 && (
-                <div className="bg-blue-50 rounded-xl px-4 py-2.5 mb-3 text-center">
-                  <p className="text-xs font-bold text-blue-500">Aapka Fare</p>
-                  <p className="text-2xl font-black text-blue-700">₹{sharedFare}</p>
+              {sharedFare > 0 && (<>
+                <div className="mb-3">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Kitni Seats Chahiye?</p>
+                  <div className="flex gap-2">
+                    {[1, 2, 3, 4].map(n => (
+                      <button key={n} onClick={() => setSelectedSeats(n)}
+                        className={`flex-1 py-2.5 rounded-xl font-black text-sm transition-all ${selectedSeats === n ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'bg-slate-100 text-slate-500'}`}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              )}
+                <div className="bg-blue-50 rounded-xl px-4 py-2.5 mb-3 text-center">
+                  <p className="text-xs font-bold text-blue-500">Total Fare ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
+                  <p className="text-2xl font-black text-blue-700">₹{sharedFare * selectedSeats}</p>
+                  {selectedSeats > 1 && <p className="text-[10px] text-blue-400 font-bold">₹{sharedFare} × {selectedSeats}</p>}
+                </div>
+              </>)}
               <div className="flex gap-2">
-                <button onClick={() => { setSharedBookingStatus('idle'); setSelectedRoute(null); setSelectedBoardingStop(null); setSelectedDropStop(null); setSharedFare(0); }}
+                <button onClick={() => { setSharedBookingStatus('idle'); setSelectedRoute(null); setSelectedBoardingStop(null); setSelectedDropStop(null); setSharedFare(0); setSelectedSeats(1); }}
                   className="px-5 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest">
                   Back
                 </button>
                 <button onClick={handleSharedBooking}
                   disabled={!selectedBoardingStop || !selectedDropStop || sharedFare === 0}
                   className="flex-1 py-3 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-30">
-                  Book Seat
+                  Book {selectedSeats} Seat{selectedSeats > 1 ? 's' : ''}
                 </button>
               </div>
             </>)}
@@ -2302,7 +2324,8 @@ const Home = () => {
               <div className="w-full bg-slate-50 rounded-2xl p-4 flex flex-col gap-2 text-left">
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Boarding</span><span className="text-sm font-black text-slate-700">{selectedBoardingStop}</span></div>
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Drop</span><span className="text-sm font-black text-slate-700">{selectedDropStop}</span></div>
-                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Fare</span><span className="text-sm font-black text-blue-600">₹{sharedFare}</span></div>
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Seats</span><span className="text-sm font-black text-slate-700">{selectedSeats}</span></div>
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Total Fare</span><span className="text-sm font-black text-blue-600">₹{sharedFare * selectedSeats}</span></div>
               </div>
               <p className="text-xs text-slate-400 font-bold">Driver aapko pickup karega</p>
               <p className="text-[10px] text-slate-300 font-bold">💵 Cash driver ko dein</p>
@@ -2315,8 +2338,8 @@ const Home = () => {
               <h3 className="text-xl font-black text-slate-800">Aap Rickshaw Mein Hain!</h3>
               <p className="text-sm text-slate-500 font-bold">Driver aapko drop karega</p>
               <div className="bg-blue-50 rounded-2xl px-6 py-3">
-                <p className="text-xs font-bold text-blue-400">Fare reminder</p>
-                <p className="text-2xl font-black text-blue-700">₹{sharedFare}</p>
+                <p className="text-xs font-bold text-blue-400">Total Fare ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
+                <p className="text-2xl font-black text-blue-700">₹{sharedFare * selectedSeats}</p>
               </div>
             </div>
           )}
@@ -2325,7 +2348,7 @@ const Home = () => {
             <div className="flex flex-col items-center gap-4 text-center">
               <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-3xl">✅</div>
               <h3 className="text-xl font-black text-slate-800">Aap Pahunch Gaye!</h3>
-              <p className="text-sm text-slate-500 font-bold">Fare: ₹{sharedFare} — Cash driver ko dein</p>
+              <p className="text-sm text-slate-500 font-bold">Total Fare: ₹{sharedFare * selectedSeats} — Cash driver ko dein</p>
               <button onClick={handleSharedReset}
                 className="w-full py-4 bg-slate-900 text-white rounded-[2rem] font-black tracking-widest text-[10px] uppercase">
                 Naya Booking
