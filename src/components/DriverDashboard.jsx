@@ -1678,6 +1678,7 @@ const DriverDashboard = () => {
                         <div>
                           <p className="text-sm font-black text-slate-800">{p.passengerName}</p>
                           <p className="text-[10px] text-slate-400 font-bold">Boarding: {p.boardingStop} → Drop: {p.dropStop}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">Seats: {p.seats || 1}</p>
                           <p className="text-sm font-black text-blue-600">₹{p.fare}</p>
                         </div>
                         <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
