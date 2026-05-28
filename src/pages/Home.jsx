@@ -552,8 +552,8 @@ const Home = () => {
     const boardingIdx = route.stops.indexOf(boardingStop);
     const dropIdx = route.stops.indexOf(dropStop);
     if (boardingIdx === -1 || dropIdx === -1 || dropIdx <= boardingIdx) return 0;
-    // Sum segment fares from boarding to drop (fares[i] = stops[i] → stops[i+1])
-    return (route.fares || []).slice(boardingIdx, dropIdx).reduce((sum, f) => sum + (f || 0), 0);
+    // Flat fare per drop stop — fares[dropIdx-1] is the fixed fare for that stop
+    return (route.fares || [])[dropIdx - 1] || 0;
   };
 
   const handleSharedBooking = async () => {
