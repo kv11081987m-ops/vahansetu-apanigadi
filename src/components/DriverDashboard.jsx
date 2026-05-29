@@ -37,6 +37,8 @@ import { computeFare } from '../utils/fareEngine';
 import { usePlatformConfig } from '../hooks/usePlatformConfig';
 import { useFCM } from '../hooks/useFCM';
 import { useRideHistory } from '../hooks/useRideHistory';
+import { useLanguage } from '../hooks/useLanguage';
+import LanguageToggle from './LanguageToggle';
 
 import { GoogleMap, useJsApiLoader, Marker, Polyline } from '@react-google-maps/api';
 const containerStyle = { width: '100%', height: '100%' };
@@ -597,7 +599,7 @@ const DriverDashboard = () => {
   const [driverHeading, setDriverHeading] = useState(0);
   const [newRequest, setNewRequest] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [language, setLanguage] = useState('en'); 
+  const { lang, t } = useLanguage();
   const [searchParams] = useSearchParams();
   const driverNameParam = searchParams.get('driverName');
   const [notifications, setNotifications] = useState([]);
@@ -1318,11 +1320,11 @@ const DriverDashboard = () => {
     setNewRequest(null);
   };
 
-  const t = {
+  const navLabels = {
     en: { dashboard: "Dashboard", wallet: "Wallet", history: "History", verify: "Verify", messages: "Messages" },
     hi: { dashboard: "मुख्य", wallet: "वॉलेट", history: "इतिहास", verify: "सत्यापन", messages: "संदेश" }
   };
-  const cur = t[language];
+  const cur = navLabels[lang] || navLabels['hi'];
 
   return (
     <div className="h-screen w-full relative overflow-hidden bg-slate-50">
@@ -1686,11 +1688,11 @@ const DriverDashboard = () => {
           {!activeSharedRide ? (
             <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden">
               <div className="bg-blue-600 px-5 py-3">
-                <p className="text-white font-black text-sm">🛺 साझी यात्रा अनुरोध</p>
+                <p className="text-white font-black text-sm">{t('sharedRequests')}</p>
               </div>
               <div className="p-4 flex flex-col gap-3 max-h-72 overflow-y-auto">
                 {sharedRideRequests.length === 0 ? (
-                  <p className="text-center text-slate-400 text-sm font-bold py-4">अभी कोई साझी यात्रा अनुरोध नहीं है।</p>
+                  <p className="text-center text-slate-400 text-sm font-bold py-4">{t('noSharedRequests')}</p>
                 ) : (
                   sharedRideRequests.map(ride => (
                     <div key={ride.id} className="flex items-center justify-between bg-slate-50 rounded-2xl px-4 py-3 border border-slate-100">
@@ -1700,7 +1702,7 @@ const DriverDashboard = () => {
                       </div>
                       <button onClick={() => handleAcceptSharedRide(ride)}
                         className="px-4 py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
-                        मार्ग स्वीकारें
+                        {t('acceptRoute')}
                       </button>
                     </div>
                   ))
@@ -1728,7 +1730,7 @@ const DriverDashboard = () => {
                     ))}
                   </div>
                   {routeStops[currentStopIndex + 1] && (
-                    <p className="text-[10px] font-bold text-blue-500 mt-1.5">अगला पड़ाव: {routeStops[currentStopIndex + 1]}</p>
+                    <p className="text-[10px] font-bold text-blue-500 mt-1.5">{t('nextStop')}: {routeStops[currentStopIndex + 1]}</p>
                   )}
                 </div>
               )}
@@ -1754,13 +1756,13 @@ const DriverDashboard = () => {
                       {p.status === 'driver_assigned' && p.boardingStop === routeStops[currentStopIndex] && (
                         <button onClick={() => handlePickupPassenger(p.id)}
                           className="w-full py-2 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
-                          चढ़ाया ✓
+                          {t('pickupDone')}
                         </button>
                       )}
                       {p.status === 'onboard' && p.dropStop === routeStops[currentStopIndex] && (
                         <button onClick={() => handleDropPassenger(p.id, p.fare)}
                           className="w-full py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
-                          उतारा ✓
+                          {t('dropDone')}
                         </button>
                       )}
                     </div>
@@ -1773,13 +1775,13 @@ const DriverDashboard = () => {
                     onClick={() => handleStopReached(currentStopIndex)}
                     disabled={currentStopIndex >= routeStops.length - 1}
                     className="w-full py-3 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-40">
-                    पड़ाव पहुँचे ✓
+                    {t('stopReached')}
                   </button>
                 )}
                 {sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done') && (
                   <button onClick={handleCompleteSharedTrip}
                     className="w-full py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest">
-                    यात्रा पूर्ण ✓
+                    {t('tripComplete')} ✓
                   </button>
                 )}
               </div>
@@ -2546,7 +2548,10 @@ const DriverDashboard = () => {
           </div>
         </div>
         {/* Nav tabs row */}
-        <div className="flex justify-around items-center px-4 py-2 h-14">
+        <div className="flex justify-around items-center px-4 py-2 h-14" style={{ position: 'relative' }}>
+          <div className="absolute right-3 top-1">
+            <LanguageToggle />
+          </div>
           {[
             { id: 'dashboard', icon: TrendingUp, label: cur.dashboard },
             { id: 'wallet', icon: IndianRupee, label: cur.wallet },

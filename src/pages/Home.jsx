@@ -43,6 +43,8 @@ import { usePlatformConfig } from '../hooks/usePlatformConfig';
 import { computeFare } from '../utils/fareEngine';
 import { useRideHistory } from '../hooks/useRideHistory';
 import { useFCM } from '../hooks/useFCM';
+import { useLanguage } from '../hooks/useLanguage';
+import LanguageToggle from '../components/LanguageToggle';
 
 const containerStyle = { width: '100%', height: '100%' };
 const center = { lat: 26.502, lng: 83.778 }; // Deoria Focus
@@ -314,6 +316,7 @@ const Home = () => {
   }, [isLoaded]);
 
   const { activeRide, setActiveRide } = useRide();
+  const { t } = useLanguage();
   const { config } = usePlatformConfig();
   const { rides: rideHistory, loading: historyLoading, formatDate, statusMeta } = useRideHistory(
     activeSidebarModal === 'history' && user ? { userId: user.uid } : {}
@@ -1281,13 +1284,14 @@ const Home = () => {
               <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[8px] font-black text-white flex items-center justify-center">{notifications.length > 9 ? '9+' : notifications.length}</span>
             )}
           </button>
-          <button 
+          <button
             onClick={logout}
             className="w-11 h-11 bg-white rounded-2xl shadow-xl flex items-center justify-center text-red-500 border border-slate-100 hover:bg-red-50 transition-all"
             title="Logout"
           >
             <LogOut size={20} />
           </button>
+          <LanguageToggle />
         </div>
       </div>
 
@@ -1498,7 +1502,11 @@ const Home = () => {
 
               {/* Sidebar Footer */}
               <div className="p-6 border-t border-slate-50">
-                <button 
+                <div className="mb-4">
+                  <p className="text-xs text-slate-400 font-bold mb-2">Language / भाषा</p>
+                  <LanguageToggle className="w-full justify-center" />
+                </div>
+                <button
                   onClick={logout}
                   className="w-full p-4 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all"
                 >
@@ -2194,11 +2202,11 @@ const Home = () => {
           <div className="flex gap-1 mb-4 bg-slate-100 p-1 rounded-2xl">
             <button onClick={() => setRideMode('private')}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${rideMode === 'private' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-500'}`}>
-              🚗 Niji Yatra
+              {t('nijiYatra')}
             </button>
             <button onClick={() => { setRideMode('shared'); handleSharedReset(); }}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${rideMode === 'shared' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-500'}`}>
-              🛺 Saanjhi Yatra
+              {t('saanjhiYatra')}
             </button>
           </div>
 
@@ -2272,16 +2280,16 @@ const Home = () => {
           {rideMode === 'shared' && (<>
             {sharedBookingStatus === 'idle' && (<>
               <div className="mb-3">
-                <p className="text-base font-black text-slate-800">साझी यात्रा बुक करें</p>
-                <p className="text-[11px] text-violet-500 font-black">अपनी गाड़ी, अपनी मर्ज़ी 🚗</p>
+                <p className="text-base font-black text-slate-800">{t('bookSharedRide')}</p>
+                <p className="text-[11px] text-violet-500 font-black">{t('tagline')} 🚗</p>
               </div>
 
               {/* Route Search */}
               <div className="bg-slate-50 rounded-2xl p-3 mb-3 border border-slate-100">
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">🔍 अपना पड़ाव खोजें</p>
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">{t('searchStop')}</p>
                 <div className="flex flex-col gap-2 mb-2">
                   <div>
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">कहाँ से?</p>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('whereFrom')}</p>
                     <input
                       type="text"
                       placeholder="Jaise: Railway Station"
@@ -2291,7 +2299,7 @@ const Home = () => {
                     />
                   </div>
                   <div>
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">कहाँ जाना है?</p>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{t('whereTo')}</p>
                     <input
                       type="text"
                       placeholder="Jaise: Medical College"
@@ -2343,7 +2351,7 @@ const Home = () => {
               <p className="text-sm font-black text-slate-800 mb-3">{selectedRoute.name}</p>
               <div className="flex flex-col gap-3 mb-3">
                 <div>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">चढ़ने का पड़ाव</p>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('boardingStop')}</p>
                   <select value={selectedBoardingStop || ''}
                     onChange={e => { setSelectedBoardingStop(e.target.value); setSelectedDropStop(null); setSharedFare(0); }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none">
@@ -2354,7 +2362,7 @@ const Home = () => {
                   </select>
                 </div>
                 <div>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">उतरने का पड़ाव</p>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('dropStop')}</p>
                   <select value={selectedDropStop || ''}
                     onChange={e => {
                       const drop = e.target.value;
@@ -2385,7 +2393,7 @@ const Home = () => {
                   </div>
                 </div>
                 <div className="bg-blue-50 rounded-xl px-4 py-2.5 mb-3 text-center">
-                  <p className="text-xs font-bold text-blue-500">कुल किराया ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
+                  <p className="text-xs font-bold text-blue-500">{t('totalFare')} ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
                   <p className="text-2xl font-black text-blue-700">₹{sharedFare * selectedSeats}</p>
                   {selectedSeats > 1 && <p className="text-[10px] text-blue-400 font-bold">₹{sharedFare} × {selectedSeats}</p>}
                 </div>
@@ -2393,7 +2401,7 @@ const Home = () => {
               <div className="flex gap-2">
                 <button onClick={() => { setSharedBookingStatus('idle'); setSelectedRoute(null); setSelectedBoardingStop(null); setSelectedDropStop(null); setSharedFare(0); setSelectedSeats(1); }}
                   className="px-5 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest">
-                  वापस
+                  {t('back')}
                 </button>
                 <button onClick={handleSharedBooking}
                   disabled={!selectedBoardingStop || !selectedDropStop || sharedFare === 0}
@@ -2424,20 +2432,20 @@ const Home = () => {
             <div className="flex flex-col items-center gap-4 text-center">
               <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-3xl">✅</div>
               <div>
-                <h3 className="text-xl font-black text-slate-800">सीट पक्की हो गई!</h3>
+                <h3 className="text-xl font-black text-slate-800">{t('seatConfirmed')}</h3>
                 <p className="text-sm text-slate-500 font-bold mt-1">{selectedRoute?.name}</p>
               </div>
               <div className="w-full bg-slate-50 rounded-2xl p-4 flex flex-col gap-2 text-left">
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">चढ़ना</span><span className="text-sm font-black text-slate-700">{selectedBoardingStop}</span></div>
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">उतरना</span><span className="text-sm font-black text-slate-700">{selectedDropStop}</span></div>
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Seats</span><span className="text-sm font-black text-slate-700">{selectedSeats}</span></div>
-                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">कुल किराया</span><span className="text-sm font-black text-blue-600">₹{sharedFare * selectedSeats}</span></div>
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">{t('totalFare')}</span><span className="text-sm font-black text-blue-600">₹{sharedFare * selectedSeats}</span></div>
               </div>
               <p className="text-xs text-slate-400 font-bold">ApniGadi आपको लेने आएगी</p>
-              <p className="text-[10px] text-slate-300 font-bold">💵 नकद चालक को दें</p>
+              <p className="text-[10px] text-slate-300 font-bold">💵 {t('payDriver')}</p>
               <button onClick={handleShareRide}
                 className="w-full py-3 border-2 border-emerald-400 text-emerald-600 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2">
-                <Share2 size={14} /> 📤 परिवार को भेजें
+                <Share2 size={14} /> {t('shareFamily')}
               </button>
             </div>
           )}
@@ -2445,7 +2453,7 @@ const Home = () => {
           {sharedBookingStatus === 'onboard' && (
             <div className="flex flex-col items-center gap-4 text-center">
               <div className="text-5xl">🛺</div>
-              <h3 className="text-xl font-black text-slate-800">आप ApniGadi में हैं!</h3>
+              <h3 className="text-xl font-black text-slate-800">{t('onboard')} 🛺</h3>
               <p className="text-sm text-slate-500 font-bold">ApniGadi आपको छोड़ेगी</p>
               <div className="bg-blue-50 rounded-2xl px-6 py-3">
                 <p className="text-xs font-bold text-blue-400">कुल किराया ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
@@ -2453,7 +2461,7 @@ const Home = () => {
               </div>
               <button onClick={handleShareRide}
                 className="w-full py-3 border-2 border-emerald-400 text-emerald-600 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2">
-                <Share2 size={14} /> 📤 परिवार को भेजें
+                <Share2 size={14} /> {t('shareFamily')}
               </button>
             </div>
           )}
@@ -2461,11 +2469,11 @@ const Home = () => {
           {sharedBookingStatus === 'done' && (
             <div className="flex flex-col items-center gap-4 text-center">
               <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-3xl">✅</div>
-              <h3 className="text-xl font-black text-slate-800">आप पहुँच गए!</h3>
-              <p className="text-sm text-slate-500 font-bold">कुल किराया: ₹{sharedFare * selectedSeats} — नकद चालक को दें</p>
+              <h3 className="text-xl font-black text-slate-800">{t('arrived')} ✅</h3>
+              <p className="text-sm text-slate-500 font-bold">{t('totalFare')}: ₹{sharedFare * selectedSeats} — {t('payDriver')}</p>
               <button onClick={handleSharedReset}
                 className="w-full py-4 bg-slate-900 text-white rounded-[2rem] font-black tracking-widest text-[10px] uppercase">
-                नई बुकिंग करें
+                {t('newBooking')}
               </button>
             </div>
           )}

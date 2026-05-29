@@ -16,6 +16,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
+import LanguageToggle from '../components/LanguageToggle';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -204,6 +205,9 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
+      <div className="fixed top-4 right-4 z-50">
+        <LanguageToggle />
+      </div>
       <div id="recaptcha-container" />
 
       <motion.div
