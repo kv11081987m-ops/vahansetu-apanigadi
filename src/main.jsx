@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AuthProvider } from './context/AuthContext'
 import { RideProvider } from './context/RideContext'
+import { LanguageProvider } from './hooks/useLanguage'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.jsx'
@@ -20,10 +21,12 @@ const updateSW = registerSW({
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <AuthProvider>
-      <RideProvider>
-        <App />
-      </RideProvider>
-    </AuthProvider>
+    <LanguageProvider>
+      <AuthProvider>
+        <RideProvider>
+          <App />
+        </RideProvider>
+      </AuthProvider>
+    </LanguageProvider>
   </StrictMode>,
 )
