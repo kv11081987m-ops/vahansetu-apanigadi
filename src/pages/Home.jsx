@@ -2210,7 +2210,7 @@ const Home = () => {
             {sharedBookingStatus === 'idle' && (<>
               <div className="mb-3">
                 <p className="text-base font-black text-slate-800">Shared Ride Book Karo</p>
-                <p className="text-[11px] text-slate-400 font-bold">Sasta aur suvidhajanakl</p>
+                <p className="text-[11px] text-slate-400 font-bold">Sasta aur suvidhajanak safar</p>
               </div>
               {sharedRoutes.length === 0 ? (
                 <p className="text-center text-slate-400 text-sm font-bold py-4">Abhi koi active route nahi hai.</p>
@@ -2225,7 +2225,7 @@ const Home = () => {
                       </div>
                       <button onClick={() => { setSelectedRoute(route); setSharedBookingStatus('selecting_stops'); }}
                         className="px-3 py-2 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shrink-0">
-                        Select
+                        Chunein
                       </button>
                     </div>
                   ))}
@@ -2237,7 +2237,7 @@ const Home = () => {
               <p className="text-sm font-black text-slate-800 mb-3">{selectedRoute.name}</p>
               <div className="flex flex-col gap-3 mb-3">
                 <div>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Boarding Stop</p>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Chadhne Ka Stop</p>
                   <select value={selectedBoardingStop || ''}
                     onChange={e => { setSelectedBoardingStop(e.target.value); setSelectedDropStop(null); setSharedFare(0); }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-800 outline-none">
@@ -2248,7 +2248,7 @@ const Home = () => {
                   </select>
                 </div>
                 <div>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Drop Stop</p>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Utarne Ka Stop</p>
                   <select value={selectedDropStop || ''}
                     onChange={e => {
                       const drop = e.target.value;
@@ -2279,7 +2279,7 @@ const Home = () => {
                   </div>
                 </div>
                 <div className="bg-blue-50 rounded-xl px-4 py-2.5 mb-3 text-center">
-                  <p className="text-xs font-bold text-blue-500">Total Fare ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
+                  <p className="text-xs font-bold text-blue-500">Kul Kiraya ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
                   <p className="text-2xl font-black text-blue-700">₹{sharedFare * selectedSeats}</p>
                   {selectedSeats > 1 && <p className="text-[10px] text-blue-400 font-bold">₹{sharedFare} × {selectedSeats}</p>}
                 </div>
@@ -2287,12 +2287,12 @@ const Home = () => {
               <div className="flex gap-2">
                 <button onClick={() => { setSharedBookingStatus('idle'); setSelectedRoute(null); setSelectedBoardingStop(null); setSelectedDropStop(null); setSharedFare(0); setSelectedSeats(1); }}
                   className="px-5 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest">
-                  Back
+                  Wapas
                 </button>
                 <button onClick={handleSharedBooking}
                   disabled={!selectedBoardingStop || !selectedDropStop || sharedFare === 0}
                   className="flex-1 py-3 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-30">
-                  Book {selectedSeats} Seat{selectedSeats > 1 ? 's' : ''}
+                  {selectedSeats} Seat Book Karo
                 </button>
               </div>
             </>)}
@@ -2318,14 +2318,14 @@ const Home = () => {
             <div className="flex flex-col items-center gap-4 text-center">
               <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-3xl">✅</div>
               <div>
-                <h3 className="text-xl font-black text-slate-800">Seat Confirmed!</h3>
+                <h3 className="text-xl font-black text-slate-800">Seat Pakki Ho Gayi!</h3>
                 <p className="text-sm text-slate-500 font-bold mt-1">{selectedRoute?.name}</p>
               </div>
               <div className="w-full bg-slate-50 rounded-2xl p-4 flex flex-col gap-2 text-left">
-                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Boarding</span><span className="text-sm font-black text-slate-700">{selectedBoardingStop}</span></div>
-                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Drop</span><span className="text-sm font-black text-slate-700">{selectedDropStop}</span></div>
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Chadhna</span><span className="text-sm font-black text-slate-700">{selectedBoardingStop}</span></div>
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Utarna</span><span className="text-sm font-black text-slate-700">{selectedDropStop}</span></div>
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Seats</span><span className="text-sm font-black text-slate-700">{selectedSeats}</span></div>
-                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Total Fare</span><span className="text-sm font-black text-blue-600">₹{sharedFare * selectedSeats}</span></div>
+                <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Kul Kiraya</span><span className="text-sm font-black text-blue-600">₹{sharedFare * selectedSeats}</span></div>
               </div>
               <p className="text-xs text-slate-400 font-bold">Driver aapko pickup karega</p>
               <p className="text-[10px] text-slate-300 font-bold">💵 Cash driver ko dein</p>
@@ -2338,7 +2338,7 @@ const Home = () => {
               <h3 className="text-xl font-black text-slate-800">Aap Rickshaw Mein Hain!</h3>
               <p className="text-sm text-slate-500 font-bold">Driver aapko drop karega</p>
               <div className="bg-blue-50 rounded-2xl px-6 py-3">
-                <p className="text-xs font-bold text-blue-400">Total Fare ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
+                <p className="text-xs font-bold text-blue-400">Kul Kiraya ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
                 <p className="text-2xl font-black text-blue-700">₹{sharedFare * selectedSeats}</p>
               </div>
             </div>
@@ -2348,10 +2348,10 @@ const Home = () => {
             <div className="flex flex-col items-center gap-4 text-center">
               <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center text-3xl">✅</div>
               <h3 className="text-xl font-black text-slate-800">Aap Pahunch Gaye!</h3>
-              <p className="text-sm text-slate-500 font-bold">Total Fare: ₹{sharedFare * selectedSeats} — Cash driver ko dein</p>
+              <p className="text-sm text-slate-500 font-bold">Kul Kiraya: ₹{sharedFare * selectedSeats} — Cash driver ko dein</p>
               <button onClick={handleSharedReset}
                 className="w-full py-4 bg-slate-900 text-white rounded-[2rem] font-black tracking-widest text-[10px] uppercase">
-                Naya Booking
+                Nayi Booking Karo
               </button>
             </div>
           )}
