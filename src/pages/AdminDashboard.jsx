@@ -85,6 +85,7 @@ const AdminDashboard = () => {
     sharedWaitingMins: 5,
     sharedOperatingStart: '07:00',
     sharedOperatingEnd: '20:00',
+    seatPreReleaseMins: 2,
   });
   const [configSaving, setConfigSaving] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
@@ -231,6 +232,19 @@ const AdminDashboard = () => {
   const handleDeleteRoute = async (routeId) => {
     if (!window.confirm('Ye route delete karna chahte hain?')) return;
     await deleteDoc(doc(db, 'shared_routes', routeId));
+  };
+
+  const handleSeedRoute5 = async () => {
+    const exists = sharedRoutes.find(r => r.name === 'Sudama Chauraha → Deoria');
+    if (exists) { alert('Route 5 already exists!'); return; }
+    await addDoc(collection(db, 'shared_routes'), {
+      name: 'Sudama Chauraha → Deoria',
+      stops: ['Sudama Chauraha', 'Barahajia', 'Jodaura', 'Banki', 'Khoraram', 'Deoria'],
+      fares: [10, 15, 15, 15, 20],
+      isActive: true,
+      createdAt: new Date().toISOString()
+    });
+    showToast('Route 5 seeded!');
   };
 
   const handleAddStop = () => {
@@ -1681,6 +1695,12 @@ const AdminDashboard = () => {
                       className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-white font-bold outline-none focus:border-violet-600 transition-all" />
                   </div>
                 </div>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Seat Pre-Release Time (mins)</span>
+                  <input type="number" min="1" max="10" value={platformConfig.seatPreReleaseMins ?? 2}
+                    onChange={e => setPlatformConfig(p => ({ ...p, seatPreReleaseMins: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-violet-600 transition-all" />
+                </label>
               </div>
               <button onClick={handleSavePlatformConfig} disabled={configSaving}
                 className="mb-8 px-6 py-3 bg-violet-600 text-white rounded-xl font-black tracking-widest text-[11px] uppercase hover:bg-violet-500 transition-all disabled:opacity-50">
@@ -1690,10 +1710,16 @@ const AdminDashboard = () => {
               {/* Routes subsection */}
               <div className="flex items-center justify-between mb-5">
                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Shared Routes</p>
-                <button onClick={() => setShowAddRoute(v => !v)}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-violet-500 transition-all">
-                  <Plus size={12} /> Add Route
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleSeedRoute5}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-500 transition-all">
+                    Seed Route 5
+                  </button>
+                  <button onClick={() => setShowAddRoute(v => !v)}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-violet-500 transition-all">
+                    <Plus size={12} /> Add Route
+                  </button>
+                </div>
               </div>
 
               {/* Add Route Form */}

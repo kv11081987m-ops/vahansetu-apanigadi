@@ -589,6 +589,9 @@ const DriverDashboard = () => {
   const [sharedRideRequests, setSharedRideRequests] = useState([]);
   const [activeSharedRide, setActiveSharedRide] = useState(null);
   const [sharedPassengers, setSharedPassengers] = useState([]);
+  const [currentStopIndex, setCurrentStopIndex] = useState(0);
+  const [routeStops, setRouteStops] = useState([]);
+  const [preReleaseTimer, setPreReleaseTimer] = useState(null);
   const [profile, setProfile] = useState(null);
   const [driverGpsLocation, setDriverGpsLocation] = useState(null);
   const [driverHeading, setDriverHeading] = useState(0);
@@ -1008,6 +1011,11 @@ const DriverDashboard = () => {
     await Promise.all(bookingsSnap.docs.map(b =>
       updateDoc(doc(db, 'shared_bookings', b.id), { status: 'driver_assigned', driverId })
     ));
+    if (ride.routeId) {
+      const routeDoc = await getDoc(doc(db, 'shared_routes', ride.routeId));
+      if (routeDoc.exists()) setRouteStops(routeDoc.data().stops || []);
+    }
+    setCurrentStopIndex(0);
     setActiveSharedRide(ride);
     setSharedRideRequests([]);
   };
@@ -1039,7 +1047,44 @@ const DriverDashboard = () => {
     await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), { status: 'completed' });
     setActiveSharedRide(null);
     setSharedPassengers([]);
+    setRouteStops([]);
+    setCurrentStopIndex(0);
   };
+
+  const handleStopReached = async (stopIndex) => {
+    const newIndex = stopIndex + 1;
+    setCurrentStopIndex(newIndex);
+    await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), {
+      currentStopIndex: newIndex,
+      currentStop: routeStops[newIndex]
+    });
+    const nextStop = routeStops[newIndex + 1];
+    if (!nextStop) return;
+    const configDoc = await getDoc(doc(db, 'config', 'platform'));
+    const preReleaseMins = configDoc.data()?.seatPreReleaseMins || 2;
+    const bookingsSnap = await getDocs(
+      query(
+        collection(db, 'shared_bookings'),
+        where('rideId', '==', activeSharedRide.id),
+        where('dropStop', '==', nextStop),
+        where('status', '==', 'onboard')
+      )
+    );
+    if (bookingsSnap.empty) return;
+    if (preReleaseTimer) clearTimeout(preReleaseTimer);
+    const timer = setTimeout(async () => {
+      const seatsToRelease = bookingsSnap.docs.reduce((sum, d) => sum + (d.data().seats || 1), 0);
+      await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), {
+        availableSeats: increment(seatsToRelease),
+        preReleasedStop: nextStop
+      });
+    }, preReleaseMins * 60 * 1000);
+    setPreReleaseTimer(timer);
+  };
+
+  useEffect(() => {
+    return () => { if (preReleaseTimer) clearTimeout(preReleaseTimer); };
+  }, [preReleaseTimer]);
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1668,6 +1713,25 @@ const DriverDashboard = () => {
                 <p className="text-white font-black text-sm">{activeSharedRide.routeName}</p>
                 <p className="text-blue-200 text-[10px] font-bold uppercase tracking-widest">Active Shared Trip</p>
               </div>
+              {routeStops.length > 0 && (
+                <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 shrink-0">
+                  <div className="flex items-center gap-1 flex-wrap gap-y-1">
+                    {routeStops.map((stop, idx) => (
+                      <React.Fragment key={idx}>
+                        <span className={`text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap ${
+                          idx < currentStopIndex ? 'bg-emerald-100 text-emerald-600' :
+                          idx === currentStopIndex ? 'bg-blue-600 text-white' :
+                          'bg-slate-200 text-slate-400'
+                        }`}>{idx < currentStopIndex ? '✓ ' : ''}{stop}</span>
+                        {idx < routeStops.length - 1 && <span className="text-slate-300 text-[9px]">→</span>}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                  {routeStops[currentStopIndex + 1] && (
+                    <p className="text-[10px] font-bold text-blue-500 mt-1.5">Agli Stop: {routeStops[currentStopIndex + 1]}</p>
+                  )}
+                </div>
+              )}
               <div className="p-4 flex flex-col gap-3 overflow-y-auto flex-1">
                 {sharedPassengers.length === 0 ? (
                   <p className="text-center text-slate-400 text-sm font-bold py-4">Passengers load ho rahe hain...</p>
@@ -1687,13 +1751,13 @@ const DriverDashboard = () => {
                           'bg-amber-100 text-amber-600'
                         }`}>{p.status === 'driver_assigned' ? 'Waiting' : p.status}</span>
                       </div>
-                      {p.status === 'driver_assigned' && (
+                      {p.status === 'driver_assigned' && p.boardingStop === routeStops[currentStopIndex] && (
                         <button onClick={() => handlePickupPassenger(p.id)}
                           className="w-full py-2 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
                           Pickup Kiya ✓
                         </button>
                       )}
-                      {p.status === 'onboard' && (
+                      {p.status === 'onboard' && p.dropStop === routeStops[currentStopIndex] && (
                         <button onClick={() => handleDropPassenger(p.id, p.fare)}
                           className="w-full py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
                           Drop Kiya ✓
@@ -1703,14 +1767,22 @@ const DriverDashboard = () => {
                   ))
                 )}
               </div>
-              {sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done') && (
-                <div className="p-4 shrink-0 border-t border-slate-100">
+              <div className="p-4 shrink-0 border-t border-slate-100 flex flex-col gap-2">
+                {routeStops.length > 0 && (
+                  <button
+                    onClick={() => handleStopReached(currentStopIndex)}
+                    disabled={currentStopIndex >= routeStops.length - 1}
+                    className="w-full py-3 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-40">
+                    Stop Pahunche ✓
+                  </button>
+                )}
+                {sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done') && (
                   <button onClick={handleCompleteSharedTrip}
                     className="w-full py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest">
                     Trip Complete ✓
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
         </div>
