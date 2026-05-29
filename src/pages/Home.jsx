@@ -29,7 +29,8 @@ import {
   Bell,
   Gift,
   Copy,
-  Users
+  Users,
+  Share2
 } from 'lucide-react';
 import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction, arrayUnion } from 'firebase/firestore';
 import { db } from '../services/firebase';
@@ -211,11 +212,63 @@ const Home = () => {
   const [selectedSeats, setSelectedSeats] = useState(1);
   const [sharedBookingId, setSharedBookingId] = useState(null);
   const [sharedBookingStatus, setSharedBookingStatus] = useState('idle');
+  const [boardingSearchStop, setBoardingSearchStop] = useState('');
+  const [dropSearchStop, setDropSearchStop] = useState('');
+  const [filteredRoutes, setFilteredRoutes] = useState([]);
+  const [showShareModal, setShowShareModal] = useState(false);
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
   }, []);
 
+  // Route search filter
+  useEffect(() => {
+    if (!boardingSearchStop && !dropSearchStop) {
+      setFilteredRoutes(sharedRoutes);
+      return;
+    }
+    const filtered = sharedRoutes.filter(route => {
+      const stops = (route.stops || []).map(s => s.toLowerCase());
+      const boardingMatch = !boardingSearchStop || stops.some(s => s.includes(boardingSearchStop.toLowerCase()));
+      const dropMatch = !dropSearchStop || stops.some(s => s.includes(dropSearchStop.toLowerCase()));
+      return boardingMatch && dropMatch;
+    });
+    setFilteredRoutes(filtered);
+  }, [boardingSearchStop, dropSearchStop, sharedRoutes]);
+
+  // handleShareRide
+  const handleShareRide = () => {
+    const isSharedActive = sharedBookingStatus === 'booked' || sharedBookingStatus === 'onboard' || sharedBookingStatus === 'driver_assigned';
+    const isPrivateActive = bookingStatus === 'accepted' || bookingStatus === 'started';
+    if (!isSharedActive && !isPrivateActive) return;
+    let message = '';
+    if (isSharedActive) {
+      message =
+        `🛺 Main ApniGadi mein hoon!\n` +
+        `📍 Route: ${selectedRoute?.name || ''}\n` +
+        `🚏 Chadha: ${selectedBoardingStop}\n` +
+        `🏁 Utrunga: ${selectedDropStop}\n` +
+        `💰 Kiraya: ₹${sharedFare * selectedSeats}\n` +
+        `\n🔗 Track karo: https://vahansetuapnigadi.web.app\n` +
+        `\nVahanSetu ApniGadi - Apni Gadi, Apni Marzi 🚗`;
+    } else {
+      const driverName = activeRide?.driverName || 'Driver';
+      const vehicleNo = activeRide?.vehicleNumber || '';
+      message =
+        `🚗 Main ApniGadi mein hoon!\n` +
+        `👨‍✈️ Driver: ${driverName}\n` +
+        `🚗 Gaadi: ${vehicleNo}\n` +
+        `📍 From: ${activeRide?.pickupAddress || pickup?.address || ''}\n` +
+        `🏁 To: ${activeRide?.destinationAddress || destination?.address || ''}\n` +
+        `\n🔗 Track karo: https://vahansetuapnigadi.web.app\n` +
+        `\nVahanSetu ApniGadi - Apni Gadi, Apni Marzi 🚗`;
+    }
+    if (navigator.share) {
+      navigator.share({ title: 'Meri ApniGadi Trip', text: message });
+    } else {
+      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+    }
+  };
 
   const pickupInputRef = useRef(null);
   const destInputRef = useRef(null);
@@ -1171,16 +1224,26 @@ const Home = () => {
 
       {/* SOS Emergency Button — logs to Firestore then dials 112 */}
       {(bookingStatus === 'accepted' || bookingStatus === 'started') && (
-        <button
-          onClick={async () => {
-            await handleSOS();
-            window.open('tel:112');
-          }}
-          className="fixed bottom-32 right-4 z-[500] bg-red-600 text-white font-black text-[11px] rounded-full shadow-2xl shadow-red-600/50 active:scale-90 transition-all border-2 border-red-400 flex items-center justify-center"
-          style={{ width: 56, height: 56 }}
-        >
-          SOS 🆘
-        </button>
+        <>
+          <button
+            onClick={async () => {
+              await handleSOS();
+              window.open('tel:112');
+            }}
+            className="fixed bottom-32 right-4 z-[500] bg-red-600 text-white font-black text-[11px] rounded-full shadow-2xl shadow-red-600/50 active:scale-90 transition-all border-2 border-red-400 flex items-center justify-center"
+            style={{ width: 56, height: 56 }}
+          >
+            SOS 🆘
+          </button>
+          <button
+            onClick={handleShareRide}
+            title="Parivaar ko bhejo"
+            className="fixed bottom-32 left-4 z-[500] bg-white text-emerald-600 rounded-full shadow-2xl active:scale-90 transition-all border-2 border-emerald-200 flex items-center justify-center"
+            style={{ width: 56, height: 56 }}
+          >
+            <Share2 size={22} />
+          </button>
+        </>
       )}
 
       <div className="absolute top-8 left-6 right-6 z-10 flex justify-between items-center">
@@ -2131,11 +2194,11 @@ const Home = () => {
           <div className="flex gap-1 mb-4 bg-slate-100 p-1 rounded-2xl">
             <button onClick={() => setRideMode('private')}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${rideMode === 'private' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-500'}`}>
-              🚗 Private
+              🚗 Niji Yatra
             </button>
             <button onClick={() => { setRideMode('shared'); handleSharedReset(); }}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${rideMode === 'shared' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25' : 'text-slate-500'}`}>
-              🛺 Shared
+              🛺 Saanjhi Yatra
             </button>
           </div>
 
@@ -2210,13 +2273,56 @@ const Home = () => {
             {sharedBookingStatus === 'idle' && (<>
               <div className="mb-3">
                 <p className="text-base font-black text-slate-800">Shared Ride Book Karo</p>
-                <p className="text-[11px] text-slate-400 font-bold">Sasta aur suvidhajanak safar</p>
+                <p className="text-[11px] text-violet-500 font-black">Apni Gadi, Apni Marzi 🚗</p>
               </div>
+
+              {/* Route Search */}
+              <div className="bg-slate-50 rounded-2xl p-3 mb-3 border border-slate-100">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">🔍 Apna Stop Dhundhen</p>
+                <div className="flex flex-col gap-2 mb-2">
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Kahaan Se?</p>
+                    <input
+                      type="text"
+                      placeholder="Jaise: Railway Station"
+                      value={boardingSearchStop}
+                      onChange={e => setBoardingSearchStop(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-400 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Kahaan Jaana Hai?</p>
+                    <input
+                      type="text"
+                      placeholder="Jaise: Medical College"
+                      value={dropSearchStop}
+                      onChange={e => setDropSearchStop(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-400 transition-all"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-bold text-slate-400">
+                    {!boardingSearchStop && !dropSearchStop
+                      ? `Sabhi ${sharedRoutes.length} route dikh rahe hain`
+                      : `${filteredRoutes.length} route mile`}
+                  </p>
+                  {(boardingSearchStop || dropSearchStop) && (
+                    <button onClick={() => { setBoardingSearchStop(''); setDropSearchStop(''); }}
+                      className="flex items-center gap-1 px-2 py-1 bg-slate-200 rounded-lg text-[9px] font-black text-slate-600">
+                      <X size={10} /> Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {sharedRoutes.length === 0 ? (
                 <p className="text-center text-slate-400 text-sm font-bold py-4">Abhi koi active route nahi hai.</p>
+              ) : filteredRoutes.length === 0 ? (
+                <p className="text-center text-slate-400 text-sm font-bold py-4">Koi route nahi mila. Doosra stop try karein.</p>
               ) : (
                 <div className="flex flex-col gap-3 max-h-52 overflow-y-auto scrollbar-hide">
-                  {sharedRoutes.map(route => (
+                  {filteredRoutes.map(route => (
                     <div key={route.id} className="flex items-center justify-between bg-slate-50 rounded-2xl px-4 py-3 border border-slate-100">
                       <div className="flex-1 min-w-0 mr-3">
                         <p className="text-sm font-black text-slate-800 leading-snug">{route.name}</p>
@@ -2327,20 +2433,28 @@ const Home = () => {
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Seats</span><span className="text-sm font-black text-slate-700">{selectedSeats}</span></div>
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Kul Kiraya</span><span className="text-sm font-black text-blue-600">₹{sharedFare * selectedSeats}</span></div>
               </div>
-              <p className="text-xs text-slate-400 font-bold">Driver aapko pickup karega</p>
+              <p className="text-xs text-slate-400 font-bold">ApniGadi aapko pickup karegi</p>
               <p className="text-[10px] text-slate-300 font-bold">💵 Cash driver ko dein</p>
+              <button onClick={handleShareRide}
+                className="w-full py-3 border-2 border-emerald-400 text-emerald-600 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2">
+                <Share2 size={14} /> 📤 Parivaar ko Bhejo
+              </button>
             </div>
           )}
 
           {sharedBookingStatus === 'onboard' && (
             <div className="flex flex-col items-center gap-4 text-center">
               <div className="text-5xl">🛺</div>
-              <h3 className="text-xl font-black text-slate-800">Aap Rickshaw Mein Hain!</h3>
-              <p className="text-sm text-slate-500 font-bold">Driver aapko drop karega</p>
+              <h3 className="text-xl font-black text-slate-800">Aap ApniGadi Mein Hain!</h3>
+              <p className="text-sm text-slate-500 font-bold">ApniGadi aapko drop karegi</p>
               <div className="bg-blue-50 rounded-2xl px-6 py-3">
                 <p className="text-xs font-bold text-blue-400">Kul Kiraya ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
                 <p className="text-2xl font-black text-blue-700">₹{sharedFare * selectedSeats}</p>
               </div>
+              <button onClick={handleShareRide}
+                className="w-full py-3 border-2 border-emerald-400 text-emerald-600 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2">
+                <Share2 size={14} /> 📤 Parivaar ko Bhejo
+              </button>
             </div>
           )}
 
