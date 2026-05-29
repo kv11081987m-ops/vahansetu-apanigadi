@@ -45,6 +45,11 @@ export const translations = {
     pickupDone: "चढ़ाया ✓",
     dropDone: "उतारा ✓",
     tripComplete: "यात्रा पूर्ण",
+    navDashboard: "डैशबोर्ड",
+    navWallet: "बटुआ",
+    navVerify: "सत्यापन",
+    navMessages: "संदेश",
+    navHistory: "इतिहास",
     langToggle: "English",
   },
   en: {
@@ -93,6 +98,11 @@ export const translations = {
     pickupDone: "Picked Up ✓",
     dropDone: "Dropped ✓",
     tripComplete: "Trip Complete",
+    navDashboard: "Dashboard",
+    navWallet: "Wallet",
+    navVerify: "Verify",
+    navMessages: "Messages",
+    navHistory: "History",
     langToggle: "हिंदी",
   }
 };

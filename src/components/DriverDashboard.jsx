@@ -1074,12 +1074,28 @@ const DriverDashboard = () => {
     );
     if (bookingsSnap.empty) return;
     if (preReleaseTimer) clearTimeout(preReleaseTimer);
+    const rideIdForTimer = activeSharedRide.id;
     const timer = setTimeout(async () => {
-      const seatsToRelease = bookingsSnap.docs.reduce((sum, d) => sum + (d.data().seats || 1), 0);
-      await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), {
-        availableSeats: increment(seatsToRelease),
-        preReleasedStop: nextStop
-      });
+      if (!rideIdForTimer) return;
+      try {
+        const freshSnap = await getDocs(
+          query(
+            collection(db, 'shared_bookings'),
+            where('rideId', '==', rideIdForTimer),
+            where('dropStop', '==', nextStop),
+            where('status', '==', 'onboard')
+          )
+        );
+        if (freshSnap.empty) return;
+        const seatsToRelease = freshSnap.docs.reduce((sum, d) => sum + (d.data().seats || 1), 0);
+        if (seatsToRelease <= 0) return;
+        await updateDoc(doc(db, 'shared_rides', rideIdForTimer), {
+          availableSeats: increment(seatsToRelease),
+          preReleasedStop: nextStop
+        });
+      } catch (e) {
+        console.error('Pre-release error:', e);
+      }
     }, preReleaseMins * 60 * 1000);
     setPreReleaseTimer(timer);
   };
@@ -1320,11 +1336,8 @@ const DriverDashboard = () => {
     setNewRequest(null);
   };
 
-  const navLabels = {
-    en: { dashboard: "Dashboard", wallet: "Wallet", history: "History", verify: "Verify", messages: "Messages" },
-    hi: { dashboard: "मुख्य", wallet: "वॉलेट", history: "इतिहास", verify: "सत्यापन", messages: "संदेश" }
-  };
-  const cur = navLabels[lang] || navLabels['hi'];
+  // nav labels now via i18n t() — cur kept for any remaining references
+  const cur = {};
 
   return (
     <div className="h-screen w-full relative overflow-hidden bg-slate-50">
@@ -2553,11 +2566,11 @@ const DriverDashboard = () => {
             <LanguageToggle />
           </div>
           {[
-            { id: 'dashboard', icon: TrendingUp, label: cur.dashboard },
-            { id: 'wallet', icon: IndianRupee, label: cur.wallet },
-            { id: 'verify', icon: ShieldCheck, label: 'Verify' },
-            { id: 'messages', icon: Bell, label: cur.messages },
-            { id: 'history', icon: History, label: cur.history }
+            { id: 'dashboard', icon: TrendingUp, label: t('navDashboard') },
+            { id: 'wallet', icon: IndianRupee, label: t('navWallet') },
+            { id: 'verify', icon: ShieldCheck, label: t('navVerify') },
+            { id: 'messages', icon: Bell, label: t('navMessages') },
+            { id: 'history', icon: History, label: t('navHistory') }
           ].map((item) => (
             <button key={item.id} onClick={() => setActiveTab(item.id)} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === item.id ? 'text-blue-600' : 'text-slate-400'}`}>
               <item.icon size={20} />

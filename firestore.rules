@@ -284,7 +284,7 @@ service cloud.firestore {
     // Public mapping: displayId → phone number, used for pre-auth VS-ID login.
     // Only contains phone — no other PII. Readable without auth intentionally.
     match /id_lookup/{displayId} {
-      allow read: if true;
+      allow read: if isLoggedIn();
       allow create: if isLoggedIn()
         && request.resource.data.keys().hasOnly(['phone']);
       allow update, delete: if isAdmin();
