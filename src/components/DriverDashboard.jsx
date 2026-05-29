@@ -1686,21 +1686,21 @@ const DriverDashboard = () => {
           {!activeSharedRide ? (
             <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden">
               <div className="bg-blue-600 px-5 py-3">
-                <p className="text-white font-black text-sm">🛺 Shared Ride Requests</p>
+                <p className="text-white font-black text-sm">🛺 साझी यात्रा अनुरोध</p>
               </div>
               <div className="p-4 flex flex-col gap-3 max-h-72 overflow-y-auto">
                 {sharedRideRequests.length === 0 ? (
-                  <p className="text-center text-slate-400 text-sm font-bold py-4">Abhi koi shared ride request nahi hai.</p>
+                  <p className="text-center text-slate-400 text-sm font-bold py-4">अभी कोई साझी यात्रा अनुरोध नहीं है।</p>
                 ) : (
                   sharedRideRequests.map(ride => (
                     <div key={ride.id} className="flex items-center justify-between bg-slate-50 rounded-2xl px-4 py-3 border border-slate-100">
                       <div>
                         <p className="text-sm font-black text-slate-800">{ride.routeName}</p>
-                        <p className="text-xs text-slate-400 font-bold">{(ride.passengers || []).length} log wait kar rahe hain</p>
+                        <p className="text-xs text-slate-400 font-bold">{(ride.passengers || []).length} लोग इंतज़ार कर रहे हैं</p>
                       </div>
                       <button onClick={() => handleAcceptSharedRide(ride)}
                         className="px-4 py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
-                        Accept Route
+                        मार्ग स्वीकारें
                       </button>
                     </div>
                   ))
@@ -1711,7 +1711,7 @@ const DriverDashboard = () => {
             <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden max-h-[70vh] flex flex-col">
               <div className="bg-blue-600 px-5 py-3 shrink-0">
                 <p className="text-white font-black text-sm">{activeSharedRide.routeName}</p>
-                <p className="text-blue-200 text-[10px] font-bold uppercase tracking-widest">Active Shared Trip</p>
+                <p className="text-blue-200 text-[10px] font-bold uppercase tracking-widest">सक्रिय साझी यात्रा</p>
               </div>
               {routeStops.length > 0 && (
                 <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 shrink-0">
@@ -1728,39 +1728,39 @@ const DriverDashboard = () => {
                     ))}
                   </div>
                   {routeStops[currentStopIndex + 1] && (
-                    <p className="text-[10px] font-bold text-blue-500 mt-1.5">Agli Stop: {routeStops[currentStopIndex + 1]}</p>
+                    <p className="text-[10px] font-bold text-blue-500 mt-1.5">अगला पड़ाव: {routeStops[currentStopIndex + 1]}</p>
                   )}
                 </div>
               )}
               <div className="p-4 flex flex-col gap-3 overflow-y-auto flex-1">
                 {sharedPassengers.length === 0 ? (
-                  <p className="text-center text-slate-400 text-sm font-bold py-4">Passengers load ho rahe hain...</p>
+                  <p className="text-center text-slate-400 text-sm font-bold py-4">यात्री लोड हो रहे हैं...</p>
                 ) : (
                   sharedPassengers.map(p => (
                     <div key={p.id} className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                       <div className="flex items-start justify-between mb-2">
                         <div>
                           <p className="text-sm font-black text-slate-800">{p.passengerName}</p>
-                          <p className="text-[10px] text-slate-400 font-bold">Boarding: {p.boardingStop} → Drop: {p.dropStop}</p>
-                          <p className="text-[10px] text-slate-400 font-bold">Seats: {p.seats || 1}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">चढ़ना: {p.boardingStop} → उतरना: {p.dropStop}</p>
+                          <p className="text-[10px] text-slate-400 font-bold">सीटें: {p.seats || 1}</p>
                           <p className="text-sm font-black text-blue-600">₹{p.fare}</p>
                         </div>
                         <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
                           p.status === 'onboard' ? 'bg-emerald-100 text-emerald-600' :
                           p.status === 'done' ? 'bg-slate-200 text-slate-500' :
                           'bg-amber-100 text-amber-600'
-                        }`}>{p.status === 'driver_assigned' ? 'Waiting' : p.status}</span>
+                        }`}>{p.status === 'driver_assigned' ? 'प्रतीक्षा' : p.status === 'onboard' ? 'सवार' : p.status === 'done' ? 'उतरे' : p.status}</span>
                       </div>
                       {p.status === 'driver_assigned' && p.boardingStop === routeStops[currentStopIndex] && (
                         <button onClick={() => handlePickupPassenger(p.id)}
                           className="w-full py-2 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
-                          Pickup Kiya ✓
+                          चढ़ाया ✓
                         </button>
                       )}
                       {p.status === 'onboard' && p.dropStop === routeStops[currentStopIndex] && (
                         <button onClick={() => handleDropPassenger(p.id, p.fare)}
                           className="w-full py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
-                          Drop Kiya ✓
+                          उतारा ✓
                         </button>
                       )}
                     </div>
@@ -1773,13 +1773,13 @@ const DriverDashboard = () => {
                     onClick={() => handleStopReached(currentStopIndex)}
                     disabled={currentStopIndex >= routeStops.length - 1}
                     className="w-full py-3 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-40">
-                    Stop Pahunche ✓
+                    पड़ाव पहुँचे ✓
                   </button>
                 )}
                 {sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done') && (
                   <button onClick={handleCompleteSharedTrip}
                     className="w-full py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest">
-                    Trip Complete ✓
+                    यात्रा पूर्ण ✓
                   </button>
                 )}
               </div>
@@ -1902,70 +1902,70 @@ const DriverDashboard = () => {
                             onFocus={(e) => setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300)}
                             className="flex-1 bg-slate-50 px-3 py-4 rounded-2xl text-center text-xl font-black tracking-[0.3em] outline-none border-2 border-slate-100 focus:border-blue-500 transition-all"
                           />
-                          <button onClick={handleVerifyOtp} className="flex-[1.5] py-4 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">Start Trip</button>
+                          <button onClick={handleVerifyOtp} className="flex-[1.5] py-4 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">यात्रा शुरू</button>
                         </div>
                         {newRequest.userPhone && (
                           <button
                             onClick={() => window.location.href = `tel:${newRequest.userPhone}`}
                             className="w-full py-3.5 bg-blue-600/20 text-blue-600 rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
                           >
-                            <Phone size={14} /> Call Passenger
+                            <Phone size={14} /> यात्री को कॉल करें
                           </button>
                         )}
                       </div>
                     )}
                     {newRequest.status === 'started' && newRequest.driverId === driverId && (
                       <div className="flex flex-col gap-3">
-                        <button onClick={handleCompleteRide} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">Complete Journey</button>
+                        <button onClick={handleCompleteRide} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">यात्रा समाप्त करें</button>
                         {newRequest.userPhone && (
                           <button
                             onClick={() => window.location.href = `tel:${newRequest.userPhone}`}
                             className="w-full py-3.5 bg-blue-600/20 text-blue-600 rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
                           >
-                            <Phone size={14} /> Call Passenger
+                            <Phone size={14} /> यात्री को कॉल करें
                           </button>
                         )}
                       </div>
                     )}
                     {newRequest.status === 'completed' && newRequest.driverId === driverId && driverFareBreakup && (
                       <div className="w-full bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col gap-3">
-                        <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest text-center">Bhugtan Lijiye</p>
+                        <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest text-center">भुगतान लीजिए</p>
                         <div className="text-[10px] font-bold text-slate-500 space-y-1">
-                          <div className="flex justify-between"><span>Base Fare</span><span>₹{driverFareBreakup.base}</span></div>
-                          <div className="flex justify-between"><span>Distance</span><span>₹{driverFareBreakup.distance}</span></div>
+                          <div className="flex justify-between"><span>आधार किराया</span><span>₹{driverFareBreakup.base}</span></div>
+                          <div className="flex justify-between"><span>दूरी</span><span>₹{driverFareBreakup.distance}</span></div>
                           {driverFareBreakup.waiting > 0 && (
-                            <div className="flex justify-between text-amber-600"><span>Waiting ({driverFareBreakup.waitingMins} min)</span><span>₹{driverFareBreakup.waiting}</span></div>
+                            <div className="flex justify-between text-amber-600"><span>प्रतीक्षा ({driverFareBreakup.waitingMins} मिनट)</span><span>₹{driverFareBreakup.waiting}</span></div>
                           )}
                           {driverFareBreakup.isNight && (
-                            <div className="flex justify-between text-purple-600"><span>Night Charge</span><span>₹{driverFareBreakup.nightSurcharge}</span></div>
+                            <div className="flex justify-between text-purple-600"><span>रात्रि शुल्क</span><span>₹{driverFareBreakup.nightSurcharge}</span></div>
                           )}
                           <div className="flex justify-between font-black text-slate-800 text-sm border-t border-emerald-200 pt-2">
-                            <span>Total</span><span>₹{driverFareBreakup.total}</span>
+                            <span>कुल</span><span>₹{driverFareBreakup.total}</span>
                           </div>
                         </div>
                         {/* Online Payment — Coming Soon */}
                         <div className="w-full flex flex-col items-center gap-1 bg-slate-100 rounded-xl px-4 py-3.5 border border-slate-200">
                           <Clock size={18} className="text-slate-400" />
-                          <p className="text-[10px] font-black text-slate-500">Online Payment</p>
-                          <p className="text-[11px] font-black text-slate-700">Jaldi Aa Raha Hai!</p>
+                          <p className="text-[10px] font-black text-slate-500">ऑनलाइन भुगतान</p>
+                          <p className="text-[11px] font-black text-slate-700">जल्द आ रहा है!</p>
                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Coming Soon</p>
                         </div>
                         <button
                           onClick={() => handleCashCollected(newRequest, driverFareBreakup)}
                           className="w-full py-3.5 bg-emerald-600 text-white rounded-xl font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
                         >
-                          <CheckCircle size={16} /> Cash Mila — Confirm
+                          <CheckCircle size={16} /> नकद मिला — पुष्टि करें
                         </button>
                       </div>
                     )}
                     {newRequest.status === 'payment_done' && newRequest.driverId === driverId && (
                       <div className="w-full bg-slate-100 rounded-2xl p-4 text-center">
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Payment Confirmed ✓</p>
-                        <p className="text-xs text-slate-400 mt-1">Passenger rating ka wait kar rahe hain...</p>
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">भुगतान पुष्ट ✓</p>
+                        <p className="text-xs text-slate-400 mt-1">यात्री की रेटिंग का इंतज़ार है...</p>
                       </div>
                     )}
                     {newRequest.status === 'paid' && newRequest.driverId === driverId && (
-                      <button onClick={() => setNewRequest(null)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest">Ready for Next</button>
+                      <button onClick={() => setNewRequest(null)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest">अगली सवारी के लिए तैयार</button>
                     )}
                     <button onClick={handleForceClearRide} className="text-[8px] font-black text-slate-300 uppercase tracking-[0.4em] hover:text-red-400 transition-colors text-center py-1">
                       Ride stuck? Force Clear
@@ -1985,7 +1985,7 @@ const DriverDashboard = () => {
        pendingFareBreakup && (
         <div className="mx-4 mb-4 bg-white rounded-3xl shadow-lg border-2 border-emerald-200 overflow-hidden">
           <div className="bg-emerald-600 px-4 py-3 flex items-center justify-between">
-            <p className="text-white font-black text-[11px] uppercase tracking-widest">Baaki Bhugtan</p>
+            <p className="text-white font-black text-[11px] uppercase tracking-widest">बाकी भुगतान</p>
             <p className="text-emerald-100 text-xs font-bold">
               {pendingPaymentRide.pickup?.address?.split(',')[0] || 'Pickup'} →{' '}
               {pendingPaymentRide.destination?.address?.split(',')[0] || 'Destination'}
@@ -1993,21 +1993,21 @@ const DriverDashboard = () => {
           </div>
           <div className="p-4 flex flex-col gap-3">
             <div className="text-[10px] font-bold text-slate-500 space-y-1">
-              <div className="flex justify-between"><span>Base Fare</span><span>₹{pendingFareBreakup.base}</span></div>
-              <div className="flex justify-between"><span>Distance</span><span>₹{pendingFareBreakup.distance}</span></div>
+              <div className="flex justify-between"><span>आधार किराया</span><span>₹{pendingFareBreakup.base}</span></div>
+              <div className="flex justify-between"><span>दूरी</span><span>₹{pendingFareBreakup.distance}</span></div>
               {pendingFareBreakup.waiting > 0 && (
                 <div className="flex justify-between text-amber-600">
-                  <span>Waiting ({pendingFareBreakup.waitingMins} min)</span>
+                  <span>प्रतीक्षा ({pendingFareBreakup.waitingMins} मिनट)</span>
                   <span>₹{pendingFareBreakup.waiting}</span>
                 </div>
               )}
               {pendingFareBreakup.isNight && (
                 <div className="flex justify-between text-purple-600">
-                  <span>Night Charge</span><span>₹{pendingFareBreakup.nightSurcharge}</span>
+                  <span>रात्रि शुल्क</span><span>₹{pendingFareBreakup.nightSurcharge}</span>
                 </div>
               )}
               <div className="flex justify-between font-black text-slate-800 text-sm border-t border-slate-100 pt-2">
-                <span>Total</span><span>₹{pendingFareBreakup.total}</span>
+                <span>कुल</span><span>₹{pendingFareBreakup.total}</span>
               </div>
             </div>
             {/* Online Payment — Coming Soon */}
@@ -2021,7 +2021,7 @@ const DriverDashboard = () => {
               onClick={() => handleCashCollected(pendingPaymentRide, pendingFareBreakup)}
               className="w-full py-3.5 bg-emerald-600 text-white rounded-xl font-black text-[11px] uppercase tracking-widest shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
             >
-              <CheckCircle size={16} /> Cash Mila — Confirm
+              <CheckCircle size={16} /> नकद मिला — पुष्टि करें
             </button>
           </div>
         </div>
