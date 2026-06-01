@@ -642,8 +642,8 @@ const AdminDashboard = () => {
       {/* Sidebar */}
       <aside className="w-72 bg-[#1e293b] border-r border-slate-800 flex flex-col p-6 hidden lg:flex">
         <div className="flex items-center gap-3 mb-12 px-2">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
-            <ShieldCheck className="text-white" size={24} />
+          <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20 overflow-hidden">
+            <img src="/VahanSetu_Final_Logo.png" alt="VahanSetu" className="w-9 h-9 object-contain" />
           </div>
           <h1 className="text-xl font-black text-white tracking-tighter uppercase">Admin Panel</h1>
         </div>

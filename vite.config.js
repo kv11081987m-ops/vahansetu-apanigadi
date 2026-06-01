@@ -17,10 +17,15 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: [
         'favicon.ico',
+        'favicon-16x16.png',
+        'favicon-32x32.png',
         'apple-touch-icon.png',
-        'mask-icon.svg',
+        'pwa-64x64.png',
         'pwa-192x192.png',
-        'pwa-512x512.png'
+        'pwa-512x512.png',
+        'pwa-192x192-maskable.png',
+        'pwa-512x512-maskable.png',
+        'VahanSetu_Final_Logo.png'
       ],
       workbox: {
         globPatterns: [
@@ -74,13 +79,19 @@ export default defineConfig({
         scope: '/',
         icons: [
           {
+            src: 'pwa-64x64.png',
+            sizes: '64x64',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
             src: 'pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any'
           },
           {
-            src: 'pwa-192x192.png',
+            src: 'pwa-192x192-maskable.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'maskable'
@@ -92,7 +103,7 @@ export default defineConfig({
             purpose: 'any'
           },
           {
-            src: 'pwa-512x512.png',
+            src: 'pwa-512x512-maskable.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable'

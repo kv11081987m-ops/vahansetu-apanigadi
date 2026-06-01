@@ -1455,8 +1455,8 @@ const Home = () => {
               <div className="p-8 pb-10 bg-slate-900 text-white relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/20 rounded-full -mr-16 -mt-16 blur-2xl" />
                 <div className="relative z-10">
-                  <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mb-4 border border-white/10">
-                    <User size={32} className="text-blue-400" />
+                  <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mb-4 border border-white/20 overflow-hidden">
+                    <img src="/VahanSetu_Final_Logo.png" alt="VahanSetu" className="w-14 h-14 object-contain" />
                   </div>
                   <h3 className="text-xl font-black tracking-tight">{userProfile?.name || 'VahanSetu User'}</h3>
                   <div className="flex items-center gap-2 mt-1">

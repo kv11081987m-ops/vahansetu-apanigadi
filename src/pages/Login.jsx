@@ -219,8 +219,8 @@ const Login = () => {
         <div className={`p-10 text-white transition-all duration-700 relative overflow-hidden ${headerColor}`}>
           <div className="relative z-10">
             <div className="flex justify-between items-center mb-8">
-              <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-md border border-white/30">
-                <Car size={32} />
+              <div className="p-1 bg-white/20 rounded-2xl backdrop-blur-md border border-white/30">
+                <img src="/VahanSetu_Final_Logo.png" alt="VahanSetu Logo" className="w-12 h-12 rounded-xl object-contain" />
               </div>
               <div className="text-right">
                 <h2 className="text-3xl font-black tracking-tighter uppercase leading-none">VahanSetu</h2>
