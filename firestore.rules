@@ -129,6 +129,7 @@ service cloud.firestore {
         )
         && changedFields().hasOnly([
              'status', 'driverId', 'driverName',
+             'vehicleNumber', 'driverVehicle',
              'startedAt', 'paidAt', 'cancelledReason', 'cancelledBy', 'waitingSeconds',
              'fareAmount', 'paymentMethod', 'paymentStatus', 'rejectedBy'
            ]);
