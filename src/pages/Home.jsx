@@ -198,6 +198,7 @@ const Home = () => {
   const [driverLiveLocation, setDriverLiveLocation] = useState(null);
   const [driverHeading, setDriverHeading] = useState(0);
   const [driverToPickupPath, setDriverToPickupPath] = useState([]);
+  const [driverToPickupEta, setDriverToPickupEta] = useState(null);
   const driverRouteLastCalcRef = useRef(0);
   const [isScheduled, setIsScheduled] = useState(false);
   const [scheduledDateTime, setScheduledDateTime] = useState('');
@@ -468,11 +469,12 @@ const Home = () => {
     return () => unsub();
   }, [matchedDriver?.id, bookingStatus]);
 
-  // Driver→Pickup route during accepted status.
+  // Driver→Pickup route + ETA during accepted status.
   // Recalculated at most once per 30s to avoid hammering the Directions API.
   useEffect(() => {
     if (bookingStatus !== 'accepted' || !driverLiveLocation || !pickup || !isLoaded || !window.google) {
       setDriverToPickupPath([]);
+      setDriverToPickupEta(null);
       driverRouteLastCalcRef.current = 0;
       return;
     }
@@ -486,8 +488,12 @@ const Home = () => {
       travelMode: window.google.maps.TravelMode.DRIVING,
     }, (result, status) => {
       if (status === 'OK') {
+        const leg = result.routes[0].legs[0];
         const path = result.routes[0].overview_path.map(p => ({ lat: p.lat(), lng: p.lng() }));
         setDriverToPickupPath(path);
+        const arrivalTime = new Date(Date.now() + leg.duration.value * 1000)
+          .toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        setDriverToPickupEta({ duration: leg.duration.text, distance: leg.distance.text, arrivalTime });
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1293,12 +1299,39 @@ const Home = () => {
         ) : <div className="w-full h-full bg-slate-100" />}
       </div>
 
-      {/* Fix 5: ETA + Distance pill — shown on map during idle when route is calculated */}
-      {routeEta && bookingStatus === 'idle' && (
+      {/* ETA pill — idle: pickup→dest, accepted: driver→pickup, started: pickup→dest */}
+      {bookingStatus === 'idle' && routeEta && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[30] flex items-center gap-3 bg-slate-900/90 backdrop-blur-sm text-white px-5 py-2 rounded-full text-sm shadow-lg pointer-events-none" style={{ bottom: '46vh' }}>
           <span className="font-bold">{routeEta.duration}</span>
           <span className="text-slate-500">·</span>
           <span className="font-bold">{routeEta.distance}</span>
+        </div>
+      )}
+      {bookingStatus === 'accepted' && driverToPickupEta && (
+        <div className="absolute left-0 right-0 z-[30] flex items-center justify-between bg-slate-900/95 backdrop-blur-sm text-white px-5 py-3 shadow-lg pointer-events-none" style={{ bottom: '48vh' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-orange-400 rounded-full animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-orange-300">Driver Aa Raha Hai</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="font-black text-sm">{driverToPickupEta.duration}</span>
+            <span className="text-slate-400 text-xs">·</span>
+            <span className="text-slate-300 text-sm">{driverToPickupEta.distance}</span>
+            <span className="text-slate-400 text-xs">ETA {driverToPickupEta.arrivalTime}</span>
+          </div>
+        </div>
+      )}
+      {bookingStatus === 'started' && routeEta && (
+        <div className="absolute left-0 right-0 z-[30] flex items-center justify-between bg-slate-900/95 backdrop-blur-sm text-white px-5 py-3 shadow-lg pointer-events-none" style={{ bottom: '48vh' }}>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Ride Chal Rahi Hai</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="font-black text-sm">{routeEta.duration}</span>
+            <span className="text-slate-400 text-xs">·</span>
+            <span className="text-slate-300 text-sm">{routeEta.distance}</span>
+          </div>
         </div>
       )}
 
@@ -1346,9 +1379,21 @@ const Home = () => {
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <button 
-            onClick={() => map?.panTo(pickup || center)}
-            className="w-11 h-11 bg-white rounded-2xl shadow-xl flex items-center justify-center text-blue-600 border border-slate-100 hover:bg-slate-50 transition-all"
+          <button
+            onClick={() => {
+              if (!map || !window.google) return;
+              if ((bookingStatus === 'accepted' || bookingStatus === 'started') && driverLiveLocation) {
+                const bounds = new window.google.maps.LatLngBounds();
+                bounds.extend(driverLiveLocation);
+                const waypoint = bookingStatus === 'accepted' ? pickup : destination;
+                if (waypoint) bounds.extend(waypoint);
+                map.fitBounds(bounds, { top: 120, bottom: 420, left: 60, right: 60 });
+              } else {
+                map.panTo(pickup || center);
+                map.setZoom(15);
+              }
+            }}
+            className="w-11 h-11 bg-white rounded-2xl shadow-xl flex items-center justify-center text-blue-600 border border-slate-100 hover:bg-slate-50 transition-all active:scale-95"
           >
             <Navigation size={20} />
           </button>
