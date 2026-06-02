@@ -72,7 +72,7 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
     if (!map || !driverLocation) return;
     map.panTo(driverLocation);
     map.setHeading(0);
-    map.setZoom(15);
+    map.setZoom(16);
   }, [map, driverLocation]);
 
   // Fix 2: 15-second route refresh tick
@@ -151,7 +151,13 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
         zoom={15}
         onLoad={onMapLoad}
         options={{
-          disableDefaultUI: true,
+          zoomControl: true,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          gestureHandling: 'greedy',
+          minZoom: 10,
+          maxZoom: 20,
           styles: [{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }]
         }}
       >
@@ -673,25 +679,48 @@ const DriverDashboard = () => {
     if (!driverId || !isOnline) return;
 
     let lastPositionTime = Date.now();
+    let lastFirestoreTime = 0;
+    let lastFirestoreLat = null;
+    let lastFirestoreLng = null;
 
     const watchId = navigator.geolocation.watchPosition(
       async (pos) => {
         const { latitude, longitude, speed, heading } = pos.coords;
         const now = Date.now();
-        const elapsed = (now - lastPositionTime) / 1000; // seconds since last ping
+        const elapsed = (now - lastPositionTime) / 1000;
         lastPositionTime = now;
 
-        // Update local GPS state for map marker — avoids Firestore-triggered re-renders
         setDriverGpsLocation({ lat: latitude, lng: longitude });
         if (heading != null && !isNaN(heading)) setDriverHeading(heading);
 
-        await updateDoc(doc(db, 'drivers', driverId), {
-          location: { lat: latitude, lng: longitude },
-          heading: heading != null && !isNaN(heading) ? heading : 0,
-          lastLocationUpdate: serverTimestamp()
-        });
+        const timeDiff = (now - lastFirestoreTime) / 1000;
+        const distDiff = lastFirestoreLat != null
+          ? calculateDistance(lastFirestoreLat, lastFirestoreLng, latitude, longitude) * 1000
+          : Infinity;
 
-        // Track waiting time during 'started' ride
+        if (timeDiff >= 3 || distDiff >= 5) {
+          lastFirestoreTime = now;
+          lastFirestoreLat = latitude;
+          lastFirestoreLng = longitude;
+
+          await updateDoc(doc(db, 'drivers', driverId), {
+            location: { lat: latitude, lng: longitude },
+            heading: heading != null && !isNaN(heading) ? heading : 0,
+            lastLocationUpdate: serverTimestamp()
+          });
+
+          if (activeSharedRide?.id) {
+            try {
+              await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), {
+                driverLocation: { lat: latitude, lng: longitude },
+                driverHeading: heading || 0
+              });
+            } catch (e) {
+              console.error('Shared ride location update error:', e);
+            }
+          }
+        }
+
         const ride = newRequestRef.current;
         if (ride?.status === 'started') {
           const speedKmh = speed != null ? speed * 3.6 : 999;
@@ -699,7 +728,6 @@ const DriverDashboard = () => {
             waitingSecondsRef.current += elapsed;
           }
 
-          // Flush to Firestore every 30 seconds
           if (now - lastWaitingFlushRef.current >= 30000) {
             lastWaitingFlushRef.current = now;
             try {
@@ -716,11 +744,12 @@ const DriverDashboard = () => {
         console.error("Location Error:", err);
         setLocationError('GPS error: Location update band ho gayi. Dobara try karein.');
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000, distanceFilter: 5 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [driverId, isOnline]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driverId, isOnline, activeSharedRide?.id]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -1002,16 +1031,18 @@ const DriverDashboard = () => {
   }, [activeSharedRide?.id]);
 
   const handleAcceptSharedRide = async (ride) => {
+    const vehicleNo = profile?.vehicleNumber || profile?.rcNumber || '';
     await updateDoc(doc(db, 'shared_rides', ride.id), {
       driverId: driverId,
       status: 'accepted',
-      acceptedAt: new Date().toISOString()
+      acceptedAt: new Date().toISOString(),
+      vehicleNumber: vehicleNo
     });
     const bookingsSnap = await getDocs(
-      query(collection(db, 'shared_bookings'), where('rideId', '==', ride.id), where('status', '==', 'booked'))
+      query(collection(db, 'shared_bookings'), where('rideId', '==', ride.id), where('status', 'in', ['searching', 'booked']))
     );
     await Promise.all(bookingsSnap.docs.map(b =>
-      updateDoc(doc(db, 'shared_bookings', b.id), { status: 'driver_assigned', driverId })
+      updateDoc(doc(db, 'shared_bookings', b.id), { status: 'driver_assigned', driverId, vehicleNumber: vehicleNo })
     ));
     if (ride.routeId) {
       const routeDoc = await getDoc(doc(db, 'shared_routes', ride.routeId));
@@ -1126,6 +1157,7 @@ const DriverDashboard = () => {
     }
 
     try {
+      const vehicleNo = profile?.vehicleNumber || profile?.rcNumber || '';
       await runTransaction(db, async (transaction) => {
         const rideRef = doc(db, 'ride_requests', newRequest.id);
         const rideSnap = await transaction.get(rideRef);
@@ -1138,13 +1170,23 @@ const DriverDashboard = () => {
         transaction.update(rideRef, {
           status: 'accepted',
           driverId: driverId,
-          driverName: profile?.name || 'Partner'
+          driverName: profile?.name || 'Partner',
+          vehicleNumber: vehicleNo,
+          driverVehicle: vehicleNo
         });
       });
+
+      // Optimistically update to 'accepted' so that if RideContext's Q1/Q2 race briefly
+      // makes activeRide null, prevStatus is already 'accepted' and the cancellation-detection
+      // effect won't show a false "Passenger ne ride cancel kar di" toast.
+      const accepted = { ...newRequest, status: 'accepted', driverId };
+      newRequestRef.current = accepted;
+      setNewRequest(accepted);
     } catch (e) {
       console.error("Acceptance failed:", e);
       showToast(e?.message || String(e) || 'Ride accept nahi ho saki. Dobara try karein.', 'error');
-      setNewRequest(null);
+      // Do NOT call setNewRequest(null) here — RideContext listeners handle cleanup.
+      // Calling it here with prevStatus === 'pending' triggers the false cancel toast.
     }
   };
 

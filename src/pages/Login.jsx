@@ -213,32 +213,31 @@ const Login = () => {
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden border border-slate-200"
+        className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden border border-slate-200"
       >
         {/* Header */}
-        <div className={`p-10 text-white transition-all duration-700 relative overflow-hidden ${headerColor}`}>
+        <div className={`px-6 py-5 text-white transition-all duration-700 relative overflow-hidden ${headerColor}`}>
           <div className="relative z-10">
-            <div className="flex justify-between items-center mb-8">
-              <div className="p-1 bg-white/20 rounded-2xl backdrop-blur-md border border-white/30">
-                <img src="/VahanSetu_Final_Logo.png" alt="VahanSetu Logo" className="w-12 h-12 rounded-xl object-contain" />
+            <div className="flex justify-between items-center mb-3">
+              <div className="p-1 bg-white/20 rounded-xl backdrop-blur-md border border-white/30">
+                <img src="/VahanSetu_Final_Logo.png" alt="VahanSetu Logo" className="w-10 h-10 rounded-lg object-contain" />
               </div>
               <div className="text-right">
-                <h2 className="text-3xl font-black tracking-tighter uppercase leading-none">VahanSetu</h2>
-                <p className="text-white/60 text-[8px] font-bold tracking-[0.3em] uppercase mt-1">Apani Gadi • Digital Era</p>
+                <h2 className="text-xl font-black tracking-tighter uppercase leading-none">VahanSetu</h2>
               </div>
             </div>
-            <h1 className="text-4xl font-black mb-1 tracking-tight">{headerTitle}</h1>
-            <p className="text-white/70 font-bold text-xs uppercase tracking-widest">
+            <h1 className="text-2xl font-black mb-0.5 tracking-tight">{headerTitle}</h1>
+            <p className="text-white/70 font-bold text-[10px] uppercase tracking-widest">
               {step === 'login' && 'ID ya Mobile se login karein'}
               {step === 'otp' && `${resolvedPhone || identifier} pe bheja gaya`}
               {step === 'register' && 'Apni profile complete karein'}
             </p>
           </div>
-          <div className="absolute top-[-20%] right-[-10%] w-48 h-48 bg-white/10 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-[-20%] left-[-10%] w-48 h-48 bg-black/10 rounded-full blur-3xl" />
+          <div className="absolute top-[-20%] right-[-10%] w-36 h-36 bg-white/10 rounded-full blur-3xl animate-pulse" />
+          <div className="absolute bottom-[-20%] left-[-10%] w-36 h-36 bg-black/10 rounded-full blur-3xl" />
         </div>
 
-        <div className="p-10">
+        <div className="p-6">
           <AnimatePresence mode="wait">
             {/* Error Banner */}
             {error && (
@@ -247,7 +246,7 @@ const Login = () => {
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="mb-6 p-4 bg-red-50 text-red-600 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-red-100 flex items-center gap-3"
+                className="mb-3 p-3 bg-red-50 text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest border border-red-100 flex items-center gap-2"
               >
                 <AlertCircle size={14} /> {error}
               </motion.div>
@@ -263,11 +262,11 @@ const Login = () => {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
-                className="space-y-6"
+                className="space-y-3"
               >
                 {/* Identifier Input */}
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                     VS-ID ya Mobile Number
                   </label>
                   <input
@@ -275,39 +274,34 @@ const Login = () => {
                     placeholder="VS-XXXXXX ya 9XXXXXXXXX"
                     value={identifier}
                     onChange={(e) => { setIdentifier(e.target.value); setError(''); }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-slate-800 font-bold outline-none focus:border-blue-500 transition-all"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-bold outline-none focus:border-blue-500 transition-all"
                   />
                 </div>
 
                 {/* Auth Method Toggle */}
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">
-                    Login Ka Tarika
-                  </label>
-                  <div className="flex p-1.5 bg-slate-100 rounded-2xl border border-slate-200">
-                    <button
-                      onClick={() => { setAuthMethod('otp'); setError(''); }}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all duration-300 ${
-                        authMethod === 'otp'
-                          ? 'bg-white text-slate-900 shadow-lg shadow-slate-200 scale-[1.02]'
-                          : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      <MessageSquare size={14} />
-                      <span className="text-[9px] font-black uppercase tracking-widest">OTP</span>
-                    </button>
-                    <button
-                      onClick={() => { setAuthMethod('password'); setError(''); }}
-                      className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl transition-all duration-300 ${
-                        authMethod === 'password'
-                          ? 'bg-white text-slate-900 shadow-lg shadow-slate-200 scale-[1.02]'
-                          : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      <KeyRound size={14} />
-                      <span className="text-[9px] font-black uppercase tracking-widest">Password</span>
-                    </button>
-                  </div>
+                <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                  <button
+                    onClick={() => { setAuthMethod('otp'); setError(''); }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg transition-all duration-300 ${
+                      authMethod === 'otp'
+                        ? 'bg-white text-slate-900 shadow shadow-slate-200'
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <MessageSquare size={12} />
+                    <span className="text-[9px] font-black uppercase tracking-widest">OTP</span>
+                  </button>
+                  <button
+                    onClick={() => { setAuthMethod('password'); setError(''); }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg transition-all duration-300 ${
+                      authMethod === 'password'
+                        ? 'bg-white text-slate-900 shadow shadow-slate-200'
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <KeyRound size={12} />
+                    <span className="text-[9px] font-black uppercase tracking-widest">Password</span>
+                  </button>
                 </div>
 
                 {/* Password Input (visible only when password method selected) */}
@@ -318,9 +312,9 @@ const Login = () => {
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
                       exit={{ opacity: 0, height: 0 }}
-                      className="space-y-2 overflow-hidden"
+                      className="space-y-1.5 overflow-hidden"
                     >
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
                         Password
                       </label>
                       <div className="relative">
@@ -329,28 +323,28 @@ const Login = () => {
                           placeholder="••••••••"
                           value={password}
                           onChange={(e) => { setPassword(e.target.value); setError(''); }}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 pr-12 text-slate-800 font-bold outline-none focus:border-blue-500 transition-all"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 pr-10 text-slate-800 font-bold outline-none focus:border-blue-500 transition-all"
                         />
                         <button
                           type="button"
                           onClick={() => setShowPassword((v) => !v)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                         >
-                          {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                         </button>
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
 
-                <p className="text-[10px] text-slate-400 text-center leading-relaxed px-2">
-                  VahanSetu ApniGadi abhi pilot phase mein chal raha hai. Yeh ek technology platform hai, taxi company nahi.
+                <p className="text-[9px] text-slate-400 text-center">
+                  Pilot phase | Technology platform, taxi company nahi
                 </p>
 
                 <button
                   onClick={handleSubmit}
                   disabled={loading}
-                  className="w-full py-5 rounded-2xl text-white font-black tracking-widest text-[10px] uppercase shadow-xl transition-all active:scale-95 disabled:opacity-50 bg-blue-600 shadow-blue-600/20"
+                  className="w-full py-3 rounded-xl text-white font-black tracking-widest text-[10px] uppercase shadow-lg transition-all active:scale-95 disabled:opacity-50 bg-blue-600 shadow-blue-600/20"
                 >
                   {loading
                     ? 'Please wait...'
@@ -369,10 +363,10 @@ const Login = () => {
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
-                className="space-y-8 text-center"
+                className="space-y-4 text-center"
               >
-                <div className="space-y-4">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
                     6-Digit OTP Darj Karein
                   </label>
                   <input
@@ -382,22 +376,22 @@ const Login = () => {
                     value={otp}
                     onChange={(e) => { setOtp(e.target.value); setError(''); }}
                     maxLength={6}
-                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-3xl p-5 text-center text-3xl font-black tracking-[0.5em] text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition-all shadow-inner"
+                    className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-3 text-center text-2xl font-black tracking-[0.5em] text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition-all shadow-inner"
                   />
-                  <p className="text-[10px] font-bold text-slate-400">{resolvedPhone || identifier} pe bheja gaya</p>
+                  <p className="text-[9px] font-bold text-slate-400">{resolvedPhone || identifier} pe bheja gaya</p>
                 </div>
 
                 <button
                   onClick={handleVerifyOtp}
                   disabled={loading || otp.length < 6}
-                  className="w-full py-5 bg-slate-900 text-white rounded-[1.5rem] font-black tracking-widest text-[11px] uppercase shadow-2xl shadow-black/20 disabled:opacity-50"
+                  className="w-full py-3 bg-slate-900 text-white rounded-xl font-black tracking-widest text-[10px] uppercase shadow-lg shadow-black/20 disabled:opacity-50"
                 >
                   {loading ? 'Verify ho raha hai...' : 'Verify & Login'}
                 </button>
 
-                <p className="text-[10px] text-slate-400 text-center leading-relaxed">
+                <p className="text-[9px] text-slate-400 text-center">
                   Login karke aap hamare{' '}
-                  <a href="/terms" className="text-blue-500 hover:text-blue-700 font-bold">Terms of Service</a>
+                  <a href="/terms" className="text-blue-500 hover:text-blue-700 font-bold">Terms</a>
                   {' '}aur{' '}
                   <a href="/privacy-policy" className="text-blue-500 hover:text-blue-700 font-bold">Privacy Policy</a>
                   {' '}se agree karte hain.
@@ -405,7 +399,7 @@ const Login = () => {
 
                 <button
                   onClick={() => { setStep('login'); setOtp(''); setError(''); }}
-                  className="text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600"
+                  className="text-slate-400 font-black text-[9px] uppercase tracking-widest hover:text-slate-600"
                 >
                   ← Wapas Jaao
                 </button>
@@ -418,47 +412,47 @@ const Login = () => {
                 key="register-step"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-6"
+                className="space-y-3"
               >
                 {/* Role Tabs */}
-                <div className="flex p-1.5 bg-slate-100 rounded-[1.5rem] border border-slate-200">
+                <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
                   {roles.map((r) => (
                     <button
                       key={r.id}
                       onClick={() => setRole(r.id)}
-                      className={`flex-1 flex flex-col items-center gap-1 py-3 rounded-2xl transition-all duration-500 ${
+                      className={`flex-1 flex flex-col items-center gap-0.5 py-2 rounded-lg transition-all duration-500 ${
                         role === r.id
-                          ? 'bg-white text-slate-900 shadow-xl shadow-slate-200 scale-105 z-10'
+                          ? 'bg-white text-slate-900 shadow shadow-slate-200 z-10'
                           : 'text-slate-400 hover:text-slate-600'
                       }`}
                     >
-                      <r.icon size={18} />
+                      <r.icon size={15} />
                       <span className="text-[9px] font-black uppercase tracking-widest">{r.label}</span>
                     </button>
                   ))}
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {/* Name */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Pura Naam *</label>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Pura Naam *</label>
                     <input
                       type="text"
                       placeholder="e.g. Vivek Kumar"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-slate-800 font-black outline-none focus:border-blue-500 focus:bg-white transition-all shadow-inner"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-black outline-none focus:border-blue-500 focus:bg-white transition-all"
                     />
                   </div>
 
                   {/* Vehicle Type (driver only) */}
                   {role === 'driver' && (
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Vehicle Type</label>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Vehicle Type</label>
                       <select
                         value={vehicleType}
                         onChange={(e) => setVehicleType(e.target.value)}
-                        className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-slate-800 font-black outline-none focus:border-emerald-500 appearance-none cursor-pointer shadow-inner"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-black outline-none focus:border-emerald-500 appearance-none cursor-pointer"
                       >
                         <option value="battery_rickshaw">Battery Rickshaw</option>
                         <option value="chhota_hathi">Chhota Hathi</option>
@@ -467,20 +461,20 @@ const Login = () => {
                   )}
 
                   {/* Referral Code */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Referral Code (Optional)</label>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Referral Code (Optional)</label>
                     <input
                       type="text"
                       placeholder="VS-XXXXXX"
                       value={referredBy}
                       onChange={(e) => setReferredBy(e.target.value.toUpperCase())}
-                      className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-slate-800 font-black outline-none focus:border-blue-500 focus:bg-white transition-all shadow-inner"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-black outline-none focus:border-blue-500 focus:bg-white transition-all"
                     />
                   </div>
 
                   {/* Password Setup (optional) */}
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
                       Password Set Karo <span className="text-slate-300 normal-case font-bold">(Optional)</span>
                     </label>
                     <div className="relative">
@@ -489,17 +483,17 @@ const Login = () => {
                         placeholder="Aage se password se bhi login kar sakte hain"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 pr-12 text-slate-800 font-black outline-none focus:border-blue-500 focus:bg-white transition-all shadow-inner"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 pr-10 text-slate-800 font-black outline-none focus:border-blue-500 focus:bg-white transition-all"
                       />
                       <button
                         type="button"
                         onClick={() => setShowNewPassword((v) => !v)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                       >
-                        {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        {showNewPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                       </button>
                     </div>
-                    <p className="text-[9px] text-slate-400 ml-2">
+                    <p className="text-[9px] text-slate-400 ml-1">
                       Password set karna zaroori nahi. OTP hamesha kaam karega.
                     </p>
                   </div>
@@ -508,7 +502,7 @@ const Login = () => {
                 <button
                   onClick={handleFinishRegistration}
                   disabled={loading}
-                  className={`w-full py-5 rounded-[1.5rem] text-white font-black tracking-widest text-[11px] uppercase shadow-2xl transition-all disabled:opacity-50 ${
+                  className={`w-full py-3 rounded-xl text-white font-black tracking-widest text-[10px] uppercase shadow-lg transition-all disabled:opacity-50 ${
                     role === 'driver' ? 'bg-emerald-600 shadow-emerald-600/20' : 'bg-blue-600 shadow-blue-600/20'
                   }`}
                 >
@@ -521,7 +515,7 @@ const Login = () => {
         </div>
 
         {/* Footer */}
-        <div className="p-8 bg-slate-50 border-t border-slate-100 text-center">
+        <div className="p-4 bg-slate-50 border-t border-slate-100 text-center">
           <div className="flex justify-center gap-6 opacity-30 grayscale mb-4">
             <Smartphone size={16} />
             <ShieldCheck size={16} />
