@@ -60,6 +60,7 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
   const [routeColor, setRouteColor] = useState('#4A90D9');
   const [routeInfo, setRouteInfo] = useState(null); // { duration, distance, arrivalTime }
   const [routeTick, setRouteTick] = useState(0);
+  const gpsInitialRef = useRef(null);
 
   const driverLocation = driverGpsLocation || profileLocation;
 
@@ -75,7 +76,18 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
     map.setZoom(16);
   }, [map, driverLocation]);
 
-  // Fix 2: 15-second route refresh tick
+  // Trigger initial route draw when GPS first becomes available after accepting.
+  // Without this, the route effect fires at t=0 with driverLocation=null and draws nothing;
+  // the 15s tick would eventually fix it but leaves a blank map for too long.
+  useEffect(() => {
+    if (!isLoaded || !map || !driverGpsLocation) return;
+    if (newRequest?.status !== 'accepted') { gpsInitialRef.current = null; return; }
+    if (gpsInitialRef.current === newRequest?.id) return; // already triggered for this ride
+    gpsInitialRef.current = newRequest?.id;
+    setRouteTick(t => t + 1);
+  }, [isLoaded, map, driverGpsLocation, newRequest?.id, newRequest?.status]);
+
+  // 15-second route refresh tick
   useEffect(() => {
     if (!isLoaded || !newRequest || !map) return;
     const id = setInterval(() => setRouteTick(t => t + 1), 15000);

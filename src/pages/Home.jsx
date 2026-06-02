@@ -197,6 +197,8 @@ const Home = () => {
   const [isLowData, setIsLowData] = useState(false);
   const [driverLiveLocation, setDriverLiveLocation] = useState(null);
   const [driverHeading, setDriverHeading] = useState(0);
+  const [driverToPickupPath, setDriverToPickupPath] = useState([]);
+  const driverRouteLastCalcRef = useRef(0);
   const [isScheduled, setIsScheduled] = useState(false);
   const [scheduledDateTime, setScheduledDateTime] = useState('');
   const [scheduledRides, setScheduledRides] = useState([]);
@@ -465,6 +467,31 @@ const Home = () => {
     });
     return () => unsub();
   }, [matchedDriver?.id, bookingStatus]);
+
+  // Driver→Pickup route during accepted status.
+  // Recalculated at most once per 30s to avoid hammering the Directions API.
+  useEffect(() => {
+    if (bookingStatus !== 'accepted' || !driverLiveLocation || !pickup || !isLoaded || !window.google) {
+      setDriverToPickupPath([]);
+      driverRouteLastCalcRef.current = 0;
+      return;
+    }
+    const now = Date.now();
+    if (now - driverRouteLastCalcRef.current < 30000) return;
+    driverRouteLastCalcRef.current = now;
+    const ds = new window.google.maps.DirectionsService();
+    ds.route({
+      origin: { lat: Number(driverLiveLocation.lat), lng: Number(driverLiveLocation.lng) },
+      destination: { lat: Number(pickup.lat), lng: Number(pickup.lng) },
+      travelMode: window.google.maps.TravelMode.DRIVING,
+    }, (result, status) => {
+      if (status === 'OK') {
+        const path = result.routes[0].overview_path.map(p => ({ lat: p.lat(), lng: p.lng() }));
+        setDriverToPickupPath(path);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingStatus, driverLiveLocation, pickup, isLoaded]);
 
   // Auto-pan map to keep driver + relevant waypoint in view
   useEffect(() => {
@@ -1174,12 +1201,13 @@ const Home = () => {
                 }}
               />
             ))}
+            {/* pickup→destination route — shown during idle/started, faded during accepted */}
             {routePath.length > 0 && (
               <Polyline
                 path={routePath}
                 options={{
                   strokeColor: '#2563eb',
-                  strokeOpacity: 0.9,
+                  strokeOpacity: bookingStatus === 'accepted' ? 0.25 : 0.9,
                   strokeWeight: 8,
                   zIndex: 1,
                   lineCap: 'round',
@@ -1187,7 +1215,22 @@ const Home = () => {
                 }}
               />
             )}
-            
+
+            {/* driver→pickup route — orange polyline during accepted */}
+            {driverToPickupPath.length > 0 && bookingStatus === 'accepted' && (
+              <Polyline
+                path={driverToPickupPath}
+                options={{
+                  strokeColor: '#f97316',
+                  strokeOpacity: 0.9,
+                  strokeWeight: 6,
+                  zIndex: 2,
+                  lineCap: 'round',
+                  geodesic: true
+                }}
+              />
+            )}
+
             {/* Static nearby drivers — hidden during active ride tracking */}
             {!driverLiveLocation && drivers
               .filter(d => {
