@@ -904,10 +904,15 @@ const DriverDashboard = () => {
   const newRequestRef = useRef(null);
   const waitingSecondsRef = useRef(0);
   const lastWaitingFlushRef = useRef(Date.now());
+  const dismissedRideIdRef = useRef(null);
 
   // Sync activeRide from RideContext → newRequest for UI
   useEffect(() => {
     if (activeRide) {
+      // Skip rides the driver explicitly dismissed — prevents RideContext from
+      // restoring a payment_done ride after the driver clicked "अगली सवारी के लिए तैयार".
+      if (activeRide.id === dismissedRideIdRef.current) return;
+
       if (activeRide.id !== newRequestRef.current?.id) {
         waitingSecondsRef.current = activeRide.waitingSeconds || 0;
         lastWaitingFlushRef.current = Date.now();
@@ -1388,6 +1393,21 @@ const DriverDashboard = () => {
       });
     } catch { /* best-effort */ }
     setNewRequest(null);
+  };
+
+  // Called when driver taps "अगली सवारी के लिए तैयार" after payment_done.
+  // Sets Firestore to 'finished' so RideContext drops the ride from activeStatuses,
+  // and marks dismissedRideIdRef so the sync effect won't restore it before Q1 fires.
+  const handleDoneRide = async () => {
+    if (!newRequest) return;
+    const rideId = newRequest.id;
+    dismissedRideIdRef.current = rideId;
+    newRequestRef.current = null;
+    setNewRequest(null);
+    localStorage.removeItem('pendingPaymentRideId');
+    try {
+      await updateDoc(doc(db, 'ride_requests', rideId), { status: 'finished' });
+    } catch (e) { console.error('handleDoneRide error:', e); }
   };
 
   // nav labels now via i18n t() — cur kept for any remaining references
@@ -2028,13 +2048,17 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     {newRequest.status === 'payment_done' && newRequest.driverId === driverId && (
-                      <div className="w-full bg-slate-100 rounded-2xl p-4 text-center">
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">भुगतान पुष्ट ✓</p>
-                        <p className="text-xs text-slate-400 mt-1">यात्री की रेटिंग का इंतज़ार है...</p>
+                      <div className="w-full space-y-3">
+                        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 text-center">
+                          <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">✓ भुगतान पुष्ट</p>
+                        </div>
+                        <button
+                          onClick={handleDoneRide}
+                          className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all"
+                        >
+                          अगली सवारी के लिए तैयार
+                        </button>
                       </div>
-                    )}
-                    {newRequest.status === 'paid' && newRequest.driverId === driverId && (
-                      <button onClick={() => setNewRequest(null)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest">अगली सवारी के लिए तैयार</button>
                     )}
                     <button onClick={handleForceClearRide} className="text-[8px] font-black text-slate-300 uppercase tracking-[0.4em] hover:text-red-400 transition-colors text-center py-1">
                       Ride stuck? Force Clear
