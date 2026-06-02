@@ -218,6 +218,8 @@ const Home = () => {
   const [dropSearchStop, setDropSearchStop] = useState('');
   const [filteredRoutes, setFilteredRoutes] = useState([]);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [sharedDriverLocation, setSharedDriverLocation] = useState(null);
+  const [sharedDriverHeading, setSharedDriverHeading] = useState(0);
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
@@ -600,10 +602,41 @@ const Home = () => {
     if (!sharedBookingId) return;
     const unsub = onSnapshot(doc(db, 'shared_bookings', sharedBookingId), (snap) => {
       if (!snap.exists()) return;
-      setSharedBookingStatus(snap.data().status);
+      const data = snap.data();
+      if (data.status === 'searching') {
+        setSharedBookingStatus('searching');
+      } else if (data.status === 'driver_assigned' || data.status === 'booked') {
+        setSharedBookingStatus('booked');
+      } else {
+        setSharedBookingStatus(data.status);
+      }
     });
     return () => unsub();
   }, [sharedBookingId]);
+
+  useEffect(() => {
+    if (!sharedBookingId) return;
+    if (sharedBookingStatus !== 'booked' && sharedBookingStatus !== 'onboard') return;
+
+    let unsubFn = null;
+    const getSharedDriverLocation = async () => {
+      const bookingSnap = await getDoc(doc(db, 'shared_bookings', sharedBookingId));
+      if (!bookingSnap.exists()) return;
+      const rideId = bookingSnap.data().rideId;
+      if (!rideId) return;
+      return onSnapshot(doc(db, 'shared_rides', rideId), (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        if (data.driverLocation) {
+          setSharedDriverLocation(data.driverLocation);
+          setSharedDriverHeading(data.driverHeading || 0);
+        }
+      });
+    };
+
+    getSharedDriverLocation().then(u => { unsubFn = u; });
+    return () => unsubFn?.();
+  }, [sharedBookingId, sharedBookingStatus]);
 
   const calculateSharedFare = (route, boardingStop, dropStop) => {
     const boardingIdx = route.stops.indexOf(boardingStop);
@@ -663,11 +696,10 @@ const Home = () => {
         dropStop: selectedDropStop,
         seats: selectedSeats,
         fare: sharedFare * selectedSeats,
-        status: 'booked',
+        status: 'searching',
         createdAt: new Date().toISOString()
       });
       setSharedBookingId(booking.id);
-      setSharedBookingStatus('booked');
     } catch (err) {
       console.error('Shared booking error:', err);
       setSharedBookingStatus('idle');
@@ -683,6 +715,8 @@ const Home = () => {
     setSelectedDropStop(null);
     setSharedFare(0);
     setSelectedSeats(1);
+    setSharedDriverLocation(null);
+    setSharedDriverHeading(0);
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1378,6 +1412,17 @@ const Home = () => {
                     <div className="bg-white/10 rounded-2xl p-4 mb-4 text-center border border-white/10">
                       <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-1">Share OTP with Driver</p>
                       <p className="text-4xl font-black text-white tracking-[0.3em]">{otp}</p>
+                    </div>
+                  )}
+
+                  {/* Vehicle Number */}
+                  {(bookingStatus === 'accepted' || bookingStatus === 'started') && (activeRide?.vehicleNumber || activeRide?.driverVehicle) && (
+                    <div className="bg-white/10 rounded-2xl px-4 py-3 mb-4 flex items-center gap-3 border border-white/10">
+                      <Car size={14} className="text-white/50 shrink-0" />
+                      <div>
+                        <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">गाड़ी नंबर</p>
+                        <p className="text-sm font-black text-white tracking-widest">{activeRide?.vehicleNumber || activeRide?.driverVehicle}</p>
+                      </div>
                     </div>
                   )}
 
@@ -2414,8 +2459,8 @@ const Home = () => {
             {sharedBookingStatus === 'searching' && (
               <div className="flex flex-col items-center gap-3 py-4">
                 <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
-                <p className="font-black text-slate-700 text-sm">Driver dhundha ja raha hai...</p>
-                <p className="text-xs text-emerald-600 font-bold">Aapki seat reserved hai!</p>
+                <p className="font-black text-slate-700 text-sm">चालक की तलाश हो रही है...</p>
+                <p className="text-xs text-emerald-600 font-bold">आपकी सीट सुरक्षित है!</p>
               </div>
             )}
           </>)}
@@ -2441,6 +2486,31 @@ const Home = () => {
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">Seats</span><span className="text-sm font-black text-slate-700">{selectedSeats}</span></div>
                 <div className="flex justify-between"><span className="text-xs font-bold text-slate-400">{t('totalFare')}</span><span className="text-sm font-black text-blue-600">₹{sharedFare * selectedSeats}</span></div>
               </div>
+
+              {isLoaded && sharedDriverLocation && (
+                <div className="w-full" style={{ height: '200px', borderRadius: '16px', overflow: 'hidden' }}>
+                  <GoogleMap
+                    center={sharedDriverLocation}
+                    zoom={15}
+                    mapContainerStyle={{ width: '100%', height: '200px' }}
+                    options={{ disableDefaultUI: true, gestureHandling: 'none' }}
+                  >
+                    <Marker
+                      position={sharedDriverLocation}
+                      icon={{
+                        path: window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW,
+                        scale: 6,
+                        fillColor: '#4A90D9',
+                        fillOpacity: 1,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 2,
+                        rotation: sharedDriverHeading,
+                      }}
+                    />
+                  </GoogleMap>
+                </div>
+              )}
+
               <p className="text-xs text-slate-400 font-bold">ApniGadi आपको लेने आएगी</p>
               <p className="text-[10px] text-slate-300 font-bold">💵 {t('payDriver')}</p>
               <button onClick={handleShareRide}
@@ -2455,6 +2525,29 @@ const Home = () => {
               <div className="text-5xl">🛺</div>
               <h3 className="text-xl font-black text-slate-800">{t('onboard')} 🛺</h3>
               <p className="text-sm text-slate-500 font-bold">ApniGadi आपको छोड़ेगी</p>
+              {isLoaded && sharedDriverLocation && (
+                <div className="w-full" style={{ height: '180px', borderRadius: '16px', overflow: 'hidden' }}>
+                  <GoogleMap
+                    center={sharedDriverLocation}
+                    zoom={15}
+                    mapContainerStyle={{ width: '100%', height: '180px' }}
+                    options={{ disableDefaultUI: true, gestureHandling: 'none' }}
+                  >
+                    <Marker
+                      position={sharedDriverLocation}
+                      icon={{
+                        path: window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW,
+                        scale: 6,
+                        fillColor: '#4A90D9',
+                        fillOpacity: 1,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 2,
+                        rotation: sharedDriverHeading,
+                      }}
+                    />
+                  </GoogleMap>
+                </div>
+              )}
               <div className="bg-blue-50 rounded-2xl px-6 py-3">
                 <p className="text-xs font-bold text-blue-400">कुल किराया ({selectedSeats} seat{selectedSeats > 1 ? 's' : ''})</p>
                 <p className="text-2xl font-black text-blue-700">₹{sharedFare * selectedSeats}</p>
