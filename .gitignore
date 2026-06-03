@@ -3,6 +3,21 @@
 .env.local
 .claude/
 
+# Android keystore — never commit signing keys
+*.keystore
+*.jks
+
+# Android build outputs
+android/app/build/
+android/.gradle/
+android/build/
+
+# Capacitor / misc
+.firebase/
+build_error.txt
+scripts/fix-icons.js
+src/check_drivers_db.js
+
 # Logs
 logs
 *.log

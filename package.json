@@ -12,6 +12,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/cli": "^7.6.6",
+    "@capacitor/core": "^8.4.0",
     "@react-google-maps/api": "^2.20.8",
     "firebase": "^12.12.1",
     "framer-motion": "^12.38.0",
