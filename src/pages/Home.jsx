@@ -1309,67 +1309,13 @@ const Home = () => {
         ) : <div className="w-full h-full bg-slate-100" />}
       </div>
 
-      {/* ETA pill — idle: pickup→dest, accepted: driver→pickup, started: pickup→dest */}
+      {/* ETA pill — idle only */}
       {bookingStatus === 'idle' && routeEta && (
         <div className="absolute left-1/2 -translate-x-1/2 z-[30] flex items-center gap-3 bg-slate-900/90 backdrop-blur-sm text-white px-5 py-2 rounded-full text-sm shadow-lg pointer-events-none" style={{ bottom: '46vh' }}>
           <span className="font-bold">{routeEta.duration}</span>
           <span className="text-slate-500">·</span>
           <span className="font-bold">{routeEta.distance}</span>
         </div>
-      )}
-      {bookingStatus === 'accepted' && driverToPickupEta && (
-        <div className="absolute left-0 right-0 z-[30] flex items-center justify-between bg-slate-900/95 backdrop-blur-sm text-white px-5 py-3 shadow-lg pointer-events-none" style={{ bottom: '48vh' }}>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-orange-400 rounded-full animate-pulse" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-orange-300">Driver Aa Raha Hai</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="font-black text-sm">{driverToPickupEta.duration}</span>
-            <span className="text-slate-400 text-xs">·</span>
-            <span className="text-slate-300 text-sm">{driverToPickupEta.distance}</span>
-            <span className="text-slate-400 text-xs">ETA {driverToPickupEta.arrivalTime}</span>
-          </div>
-        </div>
-      )}
-      {bookingStatus === 'started' && (driverToPickupEta || routeEta) && (
-        <div className="absolute left-0 right-0 z-[30] flex items-center justify-between bg-slate-900/95 backdrop-blur-sm text-white px-5 py-3 shadow-lg pointer-events-none" style={{ bottom: '48vh' }}>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Ride Chal Rahi Hai</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="font-black text-sm">{(driverToPickupEta || routeEta).duration}</span>
-            <span className="text-slate-400 text-xs">·</span>
-            <span className="text-slate-300 text-sm">{(driverToPickupEta || routeEta).distance}</span>
-            {driverToPickupEta?.arrivalTime && (
-              <span className="text-slate-400 text-xs">ETA {driverToPickupEta.arrivalTime}</span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* SOS Emergency Button — logs to Firestore then dials 112 */}
-      {(bookingStatus === 'accepted' || bookingStatus === 'started') && (
-        <>
-          <button
-            onClick={async () => {
-              await handleSOS();
-              window.open('tel:112');
-            }}
-            className="fixed bottom-32 right-4 z-[500] bg-red-600 text-white font-black text-[11px] rounded-full shadow-2xl shadow-red-600/50 active:scale-90 transition-all border-2 border-red-400 flex items-center justify-center"
-            style={{ width: 56, height: 56 }}
-          >
-            SOS 🆘
-          </button>
-          <button
-            onClick={handleShareRide}
-            title="Parivaar ko bhejo"
-            className="fixed bottom-32 left-4 z-[500] bg-white text-emerald-600 rounded-full shadow-2xl active:scale-90 transition-all border-2 border-emerald-200 flex items-center justify-center"
-            style={{ width: 56, height: 56 }}
-          >
-            <Share2 size={22} />
-          </button>
-        </>
       )}
 
       <div className="absolute top-8 left-6 right-6 z-10 flex justify-between items-center">
@@ -1431,26 +1377,53 @@ const Home = () => {
       </div>
 
 
-      {/* Ride tracking card — minimize/maximize, shown above bottom panel */}
+      {/* Active ride bottom stack: ETA bar + compact card (stacked at bottom) */}
       <AnimatePresence>
         {(bookingStatus === 'accepted' || bookingStatus === 'started') && matchedDriver && (
           <motion.div
-            key="ride-card"
-            initial={{ y: 40, opacity: 0 }}
+            key="ride-bottom-stack"
+            initial={{ y: 60, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 40, opacity: 0 }}
-            className="absolute left-4 right-4 z-[25]"
-            style={{ bottom: '5.5rem' }}
+            exit={{ y: 60, opacity: 0 }}
+            className="absolute bottom-0 left-0 right-0 z-[25]"
           >
+            {/* ETA bar — sits directly above the card */}
+            {bookingStatus === 'accepted' && driverToPickupEta && (
+              <div className="flex items-center justify-between bg-slate-800 text-white px-4 py-2 pointer-events-none">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-orange-400 rounded-full animate-pulse" />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-orange-300">Driver Aa Raha Hai</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-xs">{driverToPickupEta.duration}</span>
+                  <span className="text-slate-500 text-xs">·</span>
+                  <span className="text-slate-300 text-xs">{driverToPickupEta.distance}</span>
+                  <span className="text-slate-500 text-[10px]">ETA {driverToPickupEta.arrivalTime}</span>
+                </div>
+              </div>
+            )}
+            {bookingStatus === 'started' && (driverToPickupEta || routeEta) && (
+              <div className="flex items-center justify-between bg-slate-800 text-white px-4 py-2 pointer-events-none">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                  <span className="text-[9px] font-black uppercase tracking-widest text-emerald-300">Ride Chal Rahi Hai</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-xs">{(driverToPickupEta || routeEta).duration}</span>
+                  <span className="text-slate-500 text-xs">·</span>
+                  <span className="text-slate-300 text-xs">{(driverToPickupEta || routeEta).distance}</span>
+                  {driverToPickupEta?.arrivalTime && <span className="text-slate-500 text-[10px]">ETA {driverToPickupEta.arrivalTime}</span>}
+                </div>
+              </div>
+            )}
+
+            {/* Compact ride card */}
             <AnimatePresence mode="wait">
               {isMinimized ? (
-                /* Compact pill — minimized */
                 <motion.div
                   key="mini"
-                  initial={{ opacity: 0, scale: 0.97 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.97 }}
-                  className="flex items-center justify-between bg-slate-900/90 backdrop-blur-md rounded-full px-5 py-3 shadow-2xl border border-white/10"
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="flex items-center justify-between bg-slate-900 px-4 py-2.5 border-t border-white/10"
                 >
                   <div className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full animate-pulse ${bookingStatus === 'started' ? 'bg-emerald-500' : 'bg-blue-400'}`} />
@@ -1458,101 +1431,76 @@ const Home = () => {
                       {bookingStatus === 'started' ? 'Trip Live' : matchedDriver.name}
                     </span>
                     {driverDistanceToWaypoint && bookingStatus === 'accepted' && (
-                      <span className="text-[9px] text-white/50">• {driverDistanceToWaypoint}</span>
+                      <span className="text-[9px] text-white/50">· {driverDistanceToWaypoint}</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
                     {bookingStatus === 'accepted' && (
-                      <span className="text-white text-sm font-black bg-white/20 px-3 py-0.5 rounded-xl tracking-widest">{otp}</span>
+                      <span className="text-white text-sm font-black bg-white/20 px-2 py-0.5 rounded-lg tracking-widest">{otp}</span>
                     )}
                     {bookingStatus === 'started' && (
-                      <span className="text-emerald-400 text-[10px] font-black bg-white/10 px-3 py-0.5 rounded-xl uppercase">Live</span>
+                      <span className="text-emerald-400 text-[10px] font-black bg-white/10 px-2 py-0.5 rounded-lg uppercase">Live</span>
                     )}
-                    <button
-                      onClick={() => setIsMinimized(false)}
-                      className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center"
-                    >
+                    <button onClick={() => setIsMinimized(false)} className="w-7 h-7 bg-white/20 rounded-full flex items-center justify-center">
                       <ChevronRight size={13} className="text-white -rotate-90" />
                     </button>
                   </div>
                 </motion.div>
               ) : (
-                /* Full expanded card */
                 <motion.div
                   key="full"
-                  initial={{ opacity: 0, scale: 0.97 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.97 }}
-                  className="bg-slate-900 rounded-[2rem] p-5 shadow-2xl border border-white/10"
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="bg-slate-900 px-4 py-2.5 border-t border-white/10"
                 >
-                  {/* Header row */}
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${bookingStatus === 'started' ? 'bg-emerald-500/20' : 'bg-blue-500/20'}`}>
-                        {bookingStatus === 'started'
-                          ? <Navigation size={16} className="text-emerald-400 animate-pulse" />
-                          : <User size={16} className="text-blue-400" />}
-                      </div>
-                      <div>
-                        <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">
-                          {bookingStatus === 'started' ? 'Ongoing Trip' : 'Driver Assigned'}
-                        </p>
-                        <h3 className="text-sm font-black text-white leading-tight">{matchedDriver.name}</h3>
-                      </div>
+                  {/* Single header row: icon + name + share + SOS + minimize */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${bookingStatus === 'started' ? 'bg-emerald-500/20' : 'bg-blue-500/20'}`}>
+                      {bookingStatus === 'started'
+                        ? <Navigation size={12} className="text-emerald-400 animate-pulse" />
+                        : <User size={12} className="text-blue-400" />}
                     </div>
-                    <button
-                      onClick={() => setIsMinimized(true)}
-                      className="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center"
-                    >
-                      <ChevronRight size={14} className="text-white rotate-90" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[8px] font-black text-white/40 uppercase tracking-widest leading-none">{bookingStatus === 'started' ? 'Ongoing' : 'Driver'}</p>
+                      <h3 className="text-xs font-black text-white leading-tight truncate">{matchedDriver.name}</h3>
+                    </div>
+                    <button onClick={handleShareRide} className="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center active:scale-90 transition-all" title="Share">
+                      <Share2 size={13} className="text-white" />
+                    </button>
+                    <button onClick={async () => { await handleSOS(); window.open('tel:112'); }} className="w-8 h-8 bg-red-600/80 rounded-full flex items-center justify-center active:scale-90 transition-all" title="SOS">
+                      <AlertCircle size={13} className="text-white" />
+                    </button>
+                    <button onClick={() => setIsMinimized(true)} className="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center active:scale-90 transition-all">
+                      <ChevronRight size={13} className="text-white rotate-90" />
                     </button>
                   </div>
 
-                  {/* OTP — prominently visible during accepted */}
+                  {/* OTP — accepted only */}
                   {bookingStatus === 'accepted' && (
-                    <div className="bg-white/10 rounded-2xl p-4 mb-4 text-center border border-white/10">
-                      <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-1">Share OTP with Driver</p>
-                      <p className="text-4xl font-black text-white tracking-[0.3em]">{otp}</p>
+                    <div className="bg-white/10 rounded-xl px-4 py-2 mb-2 text-center border border-white/10">
+                      <p className="text-[8px] font-black text-white/40 uppercase tracking-widest">Driver ko OTP batao</p>
+                      <p className="text-2xl font-black text-white tracking-[0.3em]">{otp}</p>
                     </div>
                   )}
 
-                  {/* Vehicle Number */}
-                  {(bookingStatus === 'accepted' || bookingStatus === 'started') && (activeRide?.vehicleNumber || activeRide?.driverVehicle) && (
-                    <div className="bg-white/10 rounded-2xl px-4 py-3 mb-4 flex items-center gap-3 border border-white/10">
-                      <Car size={14} className="text-white/50 shrink-0" />
-                      <div>
-                        <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">गाड़ी नंबर</p>
-                        <p className="text-sm font-black text-white tracking-widest">{activeRide?.vehicleNumber || activeRide?.driverVehicle}</p>
-                      </div>
+                  {/* Vehicle number */}
+                  {(activeRide?.vehicleNumber || activeRide?.driverVehicle) && (
+                    <div className="bg-white/10 rounded-xl px-3 py-1.5 mb-2 flex items-center gap-2 border border-white/10">
+                      <Car size={12} className="text-white/50 shrink-0" />
+                      <p className="text-xs font-black text-white tracking-widest">{activeRide?.vehicleNumber || activeRide?.driverVehicle}</p>
                     </div>
                   )}
 
-                  {/* Distance info */}
-                  {driverDistanceToWaypoint && bookingStatus === 'accepted' && (
-                    <div className="flex items-center gap-2 mb-4">
-                      <Navigation size={11} className="text-white/40" />
-                      <span className="text-[10px] text-white/60 font-bold">Driver is {driverDistanceToWaypoint} away</span>
-                    </div>
-                  )}
-
-                  {/* Action buttons */}
-                  {bookingStatus === 'accepted' ? (
-                    <div className="grid grid-cols-3 gap-2 mb-3">
-                      <button onClick={handleCallDriver} className="flex flex-col items-center gap-1.5 py-3 bg-white/10 rounded-2xl font-black text-[9px] text-white active:scale-95 transition-all">
-                        <Phone size={15} /> CALL
+                  {/* Action buttons — accepted only */}
+                  {bookingStatus === 'accepted' && (
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      <button onClick={handleCallDriver} className="flex flex-col items-center gap-1 py-2 bg-white/10 rounded-xl font-black text-[9px] text-white active:scale-95 transition-all">
+                        <Phone size={13} /> CALL
                       </button>
-                      <button onClick={() => setIsSafetyModalOpen(true)} className="flex flex-col items-center gap-1.5 py-3 bg-white/10 rounded-2xl font-black text-[9px] text-white active:scale-95 transition-all">
-                        <ShieldCheck size={15} /> SAFETY
+                      <button onClick={() => setIsSafetyModalOpen(true)} className="flex flex-col items-center gap-1 py-2 bg-white/10 rounded-xl font-black text-[9px] text-white active:scale-95 transition-all">
+                        <ShieldCheck size={13} /> SAFETY
                       </button>
-                      <button onClick={() => setShowCancelModal(true)} className="flex flex-col items-center gap-1.5 py-3 bg-red-500/20 rounded-2xl font-black text-[9px] text-red-400 active:scale-95 transition-all border border-red-500/20">
-                        <X size={15} /> CANCEL
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Safety First: Stay in vehicle</p>
-                      <button onClick={async () => { await handleSOS(); window.open('tel:112'); }} className="w-9 h-9 bg-red-600 rounded-full flex items-center justify-center shadow-lg">
-                        <AlertCircle size={15} className="text-white" />
+                      <button onClick={() => setShowCancelModal(true)} className="flex flex-col items-center gap-1 py-2 bg-red-500/20 rounded-xl font-black text-[9px] text-red-400 active:scale-95 transition-all border border-red-500/20">
+                        <X size={13} /> CANCEL
                       </button>
                     </div>
                   )}
@@ -2674,7 +2622,7 @@ const Home = () => {
         </motion.div>
       )}
 
-      {bookingStatus !== 'idle' && (
+      {bookingStatus !== 'idle' && bookingStatus !== 'accepted' && bookingStatus !== 'started' && (
       <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} className="absolute bottom-0 left-0 right-0 z-20 bg-white rounded-t-[3.5rem] shadow-[0_-30px_60px_rgba(0,0,0,0.1)] p-8 pt-6 flex flex-col gap-6 max-h-[90vh] overflow-y-auto scrollbar-hide">
         <div className="w-14 h-1.5 bg-slate-100 rounded-full mx-auto mb-2" />
         {bookingStatus === 'scheduled' && (
