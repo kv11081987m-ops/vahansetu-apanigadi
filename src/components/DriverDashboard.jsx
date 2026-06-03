@@ -76,14 +76,17 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
     map.setZoom(16);
   }, [map, driverLocation]);
 
-  // Trigger initial route draw when GPS first becomes available after accepting.
+  // Trigger initial route draw when GPS first becomes available after accepting/starting.
   // Without this, the route effect fires at t=0 with driverLocation=null and draws nothing;
   // the 15s tick would eventually fix it but leaves a blank map for too long.
+  // Key: gpsInitialRef uses "id+status" so switching accepted→started re-triggers.
   useEffect(() => {
     if (!isLoaded || !map || !driverGpsLocation) return;
-    if (newRequest?.status !== 'accepted') { gpsInitialRef.current = null; return; }
-    if (gpsInitialRef.current === newRequest?.id) return; // already triggered for this ride
-    gpsInitialRef.current = newRequest?.id;
+    const activeStatuses = ['accepted', 'started'];
+    if (!activeStatuses.includes(newRequest?.status)) { gpsInitialRef.current = null; return; }
+    const key = `${newRequest?.id}-${newRequest?.status}`;
+    if (gpsInitialRef.current === key) return;
+    gpsInitialRef.current = key;
     setRouteTick(t => t + 1);
   }, [isLoaded, map, driverGpsLocation, newRequest?.id, newRequest?.status]);
 
@@ -106,9 +109,9 @@ const MapView = React.memo(({ driverGpsLocation, newRequest, profileLocation, ma
       origin = driverLocation;
       dest = newRequest.pickup;
       color = '#4A90D9';
-    } else if (newRequest.status === 'started') {
-      // Pickup → Destination (trip route)
-      origin = newRequest.pickup;
+    } else if (newRequest.status === 'started' && driverLocation) {
+      // Driver current location → Destination (live, updates every 15s)
+      origin = driverLocation;
       dest = newRequest.destination;
       color = '#00AA44';
     }

@@ -469,10 +469,13 @@ const Home = () => {
     return () => unsub();
   }, [matchedDriver?.id, bookingStatus]);
 
-  // Driver→Pickup route + ETA during accepted status.
-  // Recalculated at most once per 30s to avoid hammering the Directions API.
+  // Live driver route: accepted → driver→pickup, started → driver→destination.
+  // Recalculated at most once per 30s. Key resets on status change so first
+  // fix fires immediately when transitioning accepted→started.
   useEffect(() => {
-    if (bookingStatus !== 'accepted' || !driverLiveLocation || !pickup || !isLoaded || !window.google) {
+    const isTracking = bookingStatus === 'accepted' || bookingStatus === 'started';
+    const waypoint = bookingStatus === 'accepted' ? pickup : destination;
+    if (!isTracking || !driverLiveLocation || !waypoint || !isLoaded || !window.google) {
       setDriverToPickupPath([]);
       setDriverToPickupEta(null);
       driverRouteLastCalcRef.current = 0;
@@ -484,7 +487,7 @@ const Home = () => {
     const ds = new window.google.maps.DirectionsService();
     ds.route({
       origin: { lat: Number(driverLiveLocation.lat), lng: Number(driverLiveLocation.lng) },
-      destination: { lat: Number(pickup.lat), lng: Number(pickup.lng) },
+      destination: { lat: Number(waypoint.lat), lng: Number(waypoint.lng) },
       travelMode: window.google.maps.TravelMode.DRIVING,
     }, (result, status) => {
       if (status === 'OK') {
@@ -497,7 +500,7 @@ const Home = () => {
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookingStatus, driverLiveLocation, pickup, isLoaded]);
+  }, [bookingStatus, driverLiveLocation, pickup, destination, isLoaded]);
 
   // Auto-pan map to keep driver + relevant waypoint in view
   useEffect(() => {
@@ -1222,12 +1225,12 @@ const Home = () => {
               />
             )}
 
-            {/* driver→pickup route — orange polyline during accepted */}
-            {driverToPickupPath.length > 0 && bookingStatus === 'accepted' && (
+            {/* live driver route — orange during accepted (→pickup), green during started (→dest) */}
+            {driverToPickupPath.length > 0 && (bookingStatus === 'accepted' || bookingStatus === 'started') && (
               <Polyline
                 path={driverToPickupPath}
                 options={{
-                  strokeColor: '#f97316',
+                  strokeColor: bookingStatus === 'started' ? '#16a34a' : '#f97316',
                   strokeOpacity: 0.9,
                   strokeWeight: 6,
                   zIndex: 2,
@@ -1321,16 +1324,19 @@ const Home = () => {
           </div>
         </div>
       )}
-      {bookingStatus === 'started' && routeEta && (
+      {bookingStatus === 'started' && (driverToPickupEta || routeEta) && (
         <div className="absolute left-0 right-0 z-[30] flex items-center justify-between bg-slate-900/95 backdrop-blur-sm text-white px-5 py-3 shadow-lg pointer-events-none" style={{ bottom: '48vh' }}>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
             <span className="text-[10px] font-black uppercase tracking-widest text-emerald-300">Ride Chal Rahi Hai</span>
           </div>
           <div className="flex items-center gap-4">
-            <span className="font-black text-sm">{routeEta.duration}</span>
+            <span className="font-black text-sm">{(driverToPickupEta || routeEta).duration}</span>
             <span className="text-slate-400 text-xs">·</span>
-            <span className="text-slate-300 text-sm">{routeEta.distance}</span>
+            <span className="text-slate-300 text-sm">{(driverToPickupEta || routeEta).distance}</span>
+            {driverToPickupEta?.arrivalTime && (
+              <span className="text-slate-400 text-xs">ETA {driverToPickupEta.arrivalTime}</span>
+            )}
           </div>
         </div>
       )}
