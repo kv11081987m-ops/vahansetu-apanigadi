@@ -78,7 +78,7 @@ service cloud.firestore {
       // Field-list restriction prevents arbitrary value manipulation.
       allow update: if isCustomer()
         && changedFields().hasOnly([
-             'walletBalance', 'totalEarnings', 'totalRides',
+             'walletBalance', 'totalEarnings', 'onlineEarnings', 'totalRides',
              'rating', 'ratingCount'
            ]);
 

@@ -1411,6 +1411,9 @@ const DriverDashboard = () => {
     try {
       await updateDoc(doc(db, 'ride_requests', rideId), { status: 'finished' });
     } catch (e) { console.error('handleDoneRide error:', e); }
+    // Clear dismissedRideIdRef after Firestore confirms 'finished' so the ref
+    // doesn't permanently block a hypothetical future ride with the same ID.
+    dismissedRideIdRef.current = null;
   };
 
   // nav labels now via i18n t() — cur kept for any remaining references

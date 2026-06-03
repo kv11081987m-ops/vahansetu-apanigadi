@@ -470,8 +470,9 @@ const Home = () => {
   }, [matchedDriver?.id, bookingStatus]);
 
   // Live driver route: accepted → driver→pickup, started → driver→destination.
-  // Recalculated at most once per 30s. Key resets on status change so first
-  // fix fires immediately when transitioning accepted→started.
+  // Recalculated at most once per 30s. Debounce resets on bookingStatus change
+  // so the first calc fires immediately when transitioning accepted→started.
+  const prevBookingStatusRef = useRef(null);
   useEffect(() => {
     const isTracking = bookingStatus === 'accepted' || bookingStatus === 'started';
     const waypoint = bookingStatus === 'accepted' ? pickup : destination;
@@ -479,7 +480,13 @@ const Home = () => {
       setDriverToPickupPath([]);
       setDriverToPickupEta(null);
       driverRouteLastCalcRef.current = 0;
+      prevBookingStatusRef.current = null;
       return;
+    }
+    // Reset debounce when status changes so accepted→started transition draws immediately
+    if (prevBookingStatusRef.current !== bookingStatus) {
+      driverRouteLastCalcRef.current = 0;
+      prevBookingStatusRef.current = bookingStatus;
     }
     const now = Date.now();
     if (now - driverRouteLastCalcRef.current < 30000) return;
