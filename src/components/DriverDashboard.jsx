@@ -1988,13 +1988,13 @@ const DriverDashboard = () => {
                       <div className="flex flex-col gap-3">
                         <div className="flex gap-3">
                           <input
-                            type="text" inputMode="numeric" maxLength="4" placeholder="OTP"
+                            type="password" inputMode="numeric" maxLength="4" placeholder="• • • •"
                             autoComplete="one-time-code"
                             value={enteredOtp} onChange={(e) => setEnteredOtp(e.target.value)}
                             onFocus={(e) => setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300)}
                             className="flex-1 bg-slate-50 px-3 py-4 rounded-2xl text-center text-xl font-black tracking-[0.3em] outline-none border-2 border-slate-100 focus:border-blue-500 transition-all"
                           />
-                          <button onClick={handleVerifyOtp} className="flex-[1.5] py-4 bg-emerald-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all">यात्रा शुरू</button>
+                          <button onClick={handleVerifyOtp} className="flex-1 py-4 bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg active:scale-95 transition-all">यात्रा शुरू</button>
                         </div>
                         {newRequest.userPhone && (
                           <button
