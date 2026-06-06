@@ -32,7 +32,7 @@ import {
   Users,
   Share2
 } from 'lucide-react';
-import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction, arrayUnion } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -81,9 +81,8 @@ const Home = () => {
   const { user, userProfile, logout } = useAuth();
   
   useEffect(() => {
-    if (userProfile?.role === 'driver' && userProfile?.role !== 'admin') {
-      navigate('/dashboard');
-    }
+    if (userProfile?.role === 'driver') navigate('/dashboard');
+    else if (userProfile?.role === 'admin') navigate('/admin');
   }, [userProfile, navigate]);
   const [service, setService] = useState('savaari');
   const [map, setMap] = useState(null);
@@ -188,6 +187,7 @@ const Home = () => {
   const [otp, setOtp] = useState(null);
   const activeRequestUnsubRef = useRef(null);
   const cancelTimeoutRef = useRef(null);
+  const sharedBookingAbortRef = useRef(false);
   const [showRating, setShowRating] = useState(false);
   const [userRating, setUserRating] = useState(0);
   const [hoveredRating, setHoveredRating] = useState(0);
@@ -200,6 +200,7 @@ const Home = () => {
   const [driverToPickupPath, setDriverToPickupPath] = useState([]);
   const [driverToPickupEta, setDriverToPickupEta] = useState(null);
   const driverRouteLastCalcRef = useRef(0);
+  const proximityAlertFiredRef = useRef(false);
   const [isScheduled, setIsScheduled] = useState(false);
   const [scheduledDateTime, setScheduledDateTime] = useState('');
   const [scheduledRides, setScheduledRides] = useState([]);
@@ -280,6 +281,7 @@ const Home = () => {
   const pickupInputRef = useRef(null);
   const destInputRef = useRef(null);
   const isProcessingPayment = useRef(false);
+  const postPaymentTimerRef = useRef(null);
   const searchAbortRef = useRef(false);
   const retryParamsRef = useRef(null);
   const [searchRadiusMsg, setSearchRadiusMsg] = useState(null);
@@ -361,6 +363,7 @@ const Home = () => {
     searchAbortRef.current = true;
     retryParamsRef.current = null;
     if (cancelTimeoutRef.current) { clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null; }
+    if (postPaymentTimerRef.current) { clearTimeout(postPaymentTimerRef.current); postPaymentTimerRef.current = null; }
     if (activeRequestUnsubRef.current) { activeRequestUnsubRef.current(); activeRequestUnsubRef.current = null; }
   }, []);
 
@@ -427,7 +430,7 @@ const Home = () => {
         }
       });
 
-      if (activeRide.pickup && activeRide.destination && isLoaded && !routePath.length) {
+      if (activeRide.pickup && activeRide.destination && isLoaded && window.google && !routePath.length) {
         const directionsService = new window.google.maps.DirectionsService();
         directionsService.route(
           {
@@ -468,6 +471,26 @@ const Home = () => {
     });
     return () => unsub();
   }, [matchedDriver?.id, bookingStatus]);
+
+  // Proximity alert — fire once when driver comes within 500m of pickup
+  useEffect(() => {
+    if (bookingStatus !== 'accepted' || !driverLiveLocation || !pickup) {
+      if (bookingStatus !== 'accepted') proximityAlertFiredRef.current = false;
+      return;
+    }
+    if (proximityAlertFiredRef.current) return;
+    const distKm = calculateDistance(driverLiveLocation.lat, driverLiveLocation.lng, pickup.lat, pickup.lng);
+    if (distKm <= 0.5) {
+      proximityAlertFiredRef.current = true;
+      showToast('Driver aapke paas aa gaya! 500m se kam doori reh gayi hai.', 'success');
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Driver Aa Raha Hai!', {
+          body: 'Aapka driver pickup point ke paas pahunch gaya hai.',
+          icon: '/favicon.ico'
+        });
+      }
+    }
+  }, [driverLiveLocation, bookingStatus, pickup, showToast]);
 
   // Live driver route: accepted → driver→pickup, started → driver→destination.
   // Recalculated at most once per 30s. Debounce resets on bookingStatus change
@@ -542,7 +565,7 @@ const Home = () => {
     if (isBookingRef.current) return;
 
     const dist = calculateDistance(pickup.lat, pickup.lng, destination.lat, destination.lng);
-    if (dist < 0.1) {
+    if (dist < (config.minRideDistanceKm || 0.1)) {
       showToast('Pickup aur destination same jagah nahi ho sakta.', 'error');
       return;
     }
@@ -662,9 +685,10 @@ const Home = () => {
     if (sharedBookingStatus !== 'booked' && sharedBookingStatus !== 'onboard') return;
 
     let unsubFn = null;
+    let cancelled = false;
     const getSharedDriverLocation = async () => {
       const bookingSnap = await getDoc(doc(db, 'shared_bookings', sharedBookingId));
-      if (!bookingSnap.exists()) return;
+      if (cancelled || !bookingSnap.exists()) return;
       const rideId = bookingSnap.data().rideId;
       if (!rideId) return;
       return onSnapshot(doc(db, 'shared_rides', rideId), (snap) => {
@@ -677,8 +701,8 @@ const Home = () => {
       });
     };
 
-    getSharedDriverLocation().then(u => { unsubFn = u; });
-    return () => unsubFn?.();
+    getSharedDriverLocation().then(u => { if (!cancelled) unsubFn = u; else u?.(); });
+    return () => { cancelled = true; unsubFn?.(); };
   }, [sharedBookingId, sharedBookingStatus]);
 
   const calculateSharedFare = (route, boardingStop, dropStop) => {
@@ -693,7 +717,10 @@ const Home = () => {
 
   const handleSharedBooking = async () => {
     if (!selectedRoute || !selectedBoardingStop || !selectedDropStop) return;
+    sharedBookingAbortRef.current = false;
     setSharedBookingStatus('searching');
+    let rideId = null;
+    let seatsReserved = false;
     try {
       const ridesSnap = await getDocs(
         query(
@@ -703,20 +730,20 @@ const Home = () => {
           where('availableSeats', '>', 0)
         )
       );
-      let rideId = null;
       if (!ridesSnap.empty) {
-        const existingRide = ridesSnap.docs[0];
-        const availableSeats = existingRide.data().availableSeats || 0;
-        if (selectedSeats > availableSeats) {
-          alert('Itni seats available nahi hain! Sirf ' + availableSeats + ' seat bachi hai.');
-          setSharedBookingStatus('selecting_stops');
-          return;
-        }
-        rideId = existingRide.id;
-        await updateDoc(doc(db, 'shared_rides', rideId), {
-          availableSeats: increment(-selectedSeats),
-          passengers: arrayUnion(user.uid)
+        const existingRideRef = doc(db, 'shared_rides', ridesSnap.docs[0].id);
+        // BUG 1 FIX: atomic transaction to prevent race condition
+        await runTransaction(db, async (tx) => {
+          const rideSnap = await tx.get(existingRideRef);
+          if (!rideSnap.exists()) throw new Error('ride_gone');
+          const available = rideSnap.data().availableSeats || 0;
+          if (selectedSeats > available) throw new Error('seats_unavailable');
+          tx.update(existingRideRef, {
+            availableSeats: increment(-selectedSeats),
+            passengers: arrayUnion(user.uid)
+          });
         });
+        rideId = ridesSnap.docs[0].id;
       } else {
         const newRide = await addDoc(collection(db, 'shared_rides'), {
           routeId: selectedRoute.id,
@@ -725,10 +752,12 @@ const Home = () => {
           availableSeats: 4 - selectedSeats,
           passengers: [user.uid],
           driverId: null,
-          createdAt: new Date().toISOString()
+          createdAt: serverTimestamp()
         });
         rideId = newRide.id;
       }
+      seatsReserved = true;
+      // BUG 2 FIX: mark complete only after booking doc created
       const booking = await addDoc(collection(db, 'shared_bookings'), {
         passengerId: user.uid,
         passengerName: userProfile?.name || 'Passenger',
@@ -740,11 +769,37 @@ const Home = () => {
         seats: selectedSeats,
         fare: sharedFare * selectedSeats,
         status: 'searching',
-        createdAt: new Date().toISOString()
+        createdAt: serverTimestamp()
       });
+      seatsReserved = false;
+      // BUG 3 FIX: discard result if user already cancelled during async ops
+      if (sharedBookingAbortRef.current) {
+        try {
+          await updateDoc(doc(db, 'shared_bookings', booking.id), { status: 'cancelled' });
+          await updateDoc(doc(db, 'shared_rides', rideId), {
+            availableSeats: increment(selectedSeats),
+            passengers: arrayRemove(user.uid)
+          });
+        } catch (e) { console.error('Abort cleanup error:', e); }
+        return;
+      }
       setSharedBookingId(booking.id);
     } catch (err) {
+      if (err.message === 'seats_unavailable' || err.message === 'ride_gone') {
+        showToast('Seats abhi available nahi hain! Dobara try karein.', 'error');
+        setSharedBookingStatus('selecting_stops');
+        return;
+      }
       console.error('Shared booking error:', err);
+      // BUG 2 FIX: restore seats if booking doc creation failed
+      if (seatsReserved && rideId) {
+        try {
+          await updateDoc(doc(db, 'shared_rides', rideId), {
+            availableSeats: increment(selectedSeats),
+            passengers: arrayRemove(user.uid)
+          });
+        } catch (e) { console.error('Seat restore error:', e); }
+      }
       setSharedBookingStatus('idle');
       showToast('Booking nahi ho saki. Dobara try karein.', 'error');
     }
@@ -762,13 +817,71 @@ const Home = () => {
     setSharedDriverHeading(0);
   };
 
+  // BUG 3 FIX: cancel shared booking and restore seats
+  const handleCancelSharedBooking = async () => {
+    sharedBookingAbortRef.current = true;
+    if (!sharedBookingId) { handleSharedReset(); return; }
+    try {
+      const bookingSnap = await getDoc(doc(db, 'shared_bookings', sharedBookingId));
+      if (bookingSnap.exists()) {
+        const data = bookingSnap.data();
+        await updateDoc(doc(db, 'shared_bookings', sharedBookingId), { status: 'cancelled' });
+        if (data.rideId) {
+          await updateDoc(doc(db, 'shared_rides', data.rideId), {
+            availableSeats: increment(data.seats || 1),
+            passengers: arrayRemove(user.uid)
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Cancel shared booking error:', err);
+    }
+    handleSharedReset();
+  };
+
+  // On-mount recovery: restore active shared booking after page refresh
+  useEffect(() => {
+    if (!user?.uid) return;
+    const recoverSharedBooking = async () => {
+      if (sharedBookingId) return;
+      try {
+        const snap = await getDocs(
+          query(
+            collection(db, 'shared_bookings'),
+            where('passengerId', '==', user.uid),
+            where('status', 'in', ['searching', 'driver_assigned', 'booked', 'onboard'])
+          )
+        );
+        if (snap.empty) return;
+        const booking = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        setSharedBookingId(booking.id);
+        setSharedBookingStatus(
+          booking.status === 'driver_assigned' || booking.status === 'booked' ? 'booked' : booking.status
+        );
+        setSelectedBoardingStop(booking.boardingStop);
+        setSelectedDropStop(booking.dropStop);
+        setSelectedSeats(booking.seats || 1);
+        setSharedFare(booking.seats ? booking.fare / booking.seats : booking.fare || 0);
+        setRideMode('shared');
+        if (booking.routeId) {
+          const routeDoc = await getDoc(doc(db, 'shared_routes', booking.routeId));
+          if (routeDoc.exists()) setSelectedRoute({ id: routeDoc.id, ...routeDoc.data() });
+        }
+      } catch (err) {
+        console.error('Shared booking recovery error:', err);
+      }
+    };
+    recoverSharedBooking();
+  }, [user?.uid]);
+
   // ─────────────────────────────────────────────────────────────────────────
 
   const findAndAssignDriver = async (bookingId, vType, rideOtp, logisticsData = {}) => {
-    const RADII = [3, 5, 7];
+    const baseRadius = config.driverSearchRadiusKm || 3;
+    const RADII = [baseRadius, baseRadius + 2, baseRadius + 4];
     const EXPAND_MSGS = [
-      '3km mein driver nahi mila, 5km mein dhundh rahe hain...',
-      '5km mein bhi nahi mila, 7km tak dhundh rahe hain...',
+      `${baseRadius}km mein driver nahi mila, ${baseRadius + 2}km mein dhundh rahe hain...`,
+      `${baseRadius + 2}km mein bhi nahi mila, ${baseRadius + 4}km tak dhundh rahe hain...`,
     ];
 
     let allDrivers = [];
@@ -822,12 +935,18 @@ const Home = () => {
 
     setSearchRadiusMsg(null);
 
+    // Clean up any previous listener before creating a new one (retry path safety)
+    activeRequestUnsubRef.current?.();
+    activeRequestUnsubRef.current = null;
+
     const requestRef = await addDoc(collection(db, 'ride_requests'), {
       bookingId,
       driverId: 'broadcast',
       vehicleType: vType,
       userId: user.uid,
       userPhone: userProfile?.phoneNumber || null,
+      userName: userProfile?.name || null,
+      passengerRating: userProfile?.passengerRating || null,
       pickup,
       destination,
       fare: vType === 'battery_rickshaw' ? fare.savaari : fare.logistics,
@@ -949,6 +1068,28 @@ const Home = () => {
       .finally(() => setScheduledRidesLoading(false));
   }, [activeSidebarModal, user]);
 
+  // Auto-broadcast scheduled rides when their time comes (checks every 60 seconds)
+  useEffect(() => {
+    if (!user) return;
+    const broadcast = async () => {
+      try {
+        const now = Date.now();
+        const snap = await getDocs(
+          query(collection(db, 'ride_requests'), where('userId', '==', user.uid), where('status', '==', 'scheduled'), limit(10))
+        );
+        snap.docs.forEach(async (d) => {
+          const scheduledMs = d.data().scheduledAt?.toMillis?.() || 0;
+          if (scheduledMs > 0 && scheduledMs <= now) {
+            await updateDoc(doc(db, 'ride_requests', d.id), { status: 'pending' }).catch(() => {});
+          }
+        });
+      } catch { /* best-effort */ }
+    };
+    broadcast();
+    const id = setInterval(broadcast, 60000);
+    return () => clearInterval(id);
+  }, [user]);
+
   const handleCancelScheduled = async (rideId) => {
     try {
       await updateDoc(doc(db, 'ride_requests', rideId), { status: 'cancelled' });
@@ -978,11 +1119,14 @@ const Home = () => {
 
 
   const handlePaymentSuccess = async (method, response = {}) => {
-    if (!requestId || !matchedDriver) return;
+    if (!requestId) return;
+    // matchedDriver fallback — can be null during ride restoration after page reload
+    const driver = matchedDriver || (activeRide?.driverId ? { id: activeRide.driverId, name: activeRide.driverName || 'Driver', rating: 4.8 } : null);
+    if (!driver) return;
     if (isProcessingPayment.current) return;
     isProcessingPayment.current = true;
 
-    setCompletedDriverName(matchedDriver?.name || activeRide?.driverName || null);
+    setCompletedDriverName(driver.name || activeRide?.driverName || null);
     // Must be set BEFORE updateDoc — RideContext sees payment_done as terminal and
     // calls setActiveRide(null), which triggers handleReset() unless bookingStatus is already payment_done
     setBookingStatus('payment_done');
@@ -1000,11 +1144,11 @@ const Home = () => {
       await addDoc(collection(db, 'transactions'), {
         rideId: requestId,
         userId: user.uid,
-        driverId: matchedDriver.id,
+        driverId: driver.id,
         amount: amount,
         status: 'success',
         method: method,
-        timestamp: new Date()
+        timestamp: serverTimestamp()
       });
 
       const driverEarning = Math.round(amount * (1 - (config.commissionPercent || 8) / 100));
@@ -1016,14 +1160,14 @@ const Home = () => {
         // Passenger side only marks ride status + records the transaction log.
       } else {
         // Online: platform has money — credit 92.5% after commission
-        await updateDoc(doc(db, 'drivers', matchedDriver.id), {
+        await updateDoc(doc(db, 'drivers', driver.id), {
           walletBalance: increment(driverEarning),
           totalEarnings: increment(amount),
           onlineEarnings: increment(amount),
           totalRides: increment(1)
         });
         await addDoc(collection(db, 'wallet_transactions'), {
-          driverId: matchedDriver.id,
+          driverId: driver.id,
           amount: driverEarning,
           fareCollected: amount,
           type: 'online_earned',
@@ -1033,7 +1177,30 @@ const Home = () => {
         });
       }
 
-      setTimeout(() => setActiveRide(null), 2000);
+      // Referral fallback — credit rewards if a pending referral exists for this user.
+      // Idempotent: transaction checks status === 'pending' before writing (Cloud Function guard).
+      try {
+        const refSnap = await getDocs(
+          query(collection(db, 'referrals'), where('refereeId', '==', user.uid), where('status', '==', 'pending'), limit(1))
+        );
+        if (!refSnap.empty) {
+          const refDoc = refSnap.docs[0];
+          const { referrerId } = refDoc.data();
+          const refereeReward = config.referralRefereeReward ?? 25;
+          const referrerReward = config.referralReferrerReward ?? 20;
+          await runTransaction(db, async (txn) => {
+            const refRef = doc(db, 'referrals', refDoc.id);
+            const latest = await txn.get(refRef);
+            if (latest.data()?.status !== 'pending') return; // Cloud Function already ran
+            txn.update(refRef, { status: 'rewarded', rewardedAt: serverTimestamp() });
+            txn.update(doc(db, 'users', user.uid), { balance: increment(refereeReward) });
+            txn.update(doc(db, 'users', referrerId), { balance: increment(referrerReward) });
+          });
+        }
+      } catch (e) { console.warn('[referral-fallback]', e); }
+
+      clearTimeout(postPaymentTimerRef.current);
+      postPaymentTimerRef.current = setTimeout(() => setActiveRide(null), 2000);
     } catch (err) {
       console.error("Payment recording error:", err);
       setBookingStatus('completed'); // Revert so user can retry
@@ -1081,18 +1248,13 @@ const Home = () => {
   const handleSubmitRating = async (rating) => {
     if (!matchedDriver || !requestId) return;
     try {
-      await addDoc(collection(db, 'ratings'), {
-        driverId: matchedDriver.id,
-        userId: user.uid,
-        rideId: requestId,
-        rating: rating,
-        timestamp: new Date()
-      });
-
       const driverRef = doc(db, 'drivers', matchedDriver.id);
       const rideRef = doc(db, 'ride_requests', requestId);
+      const ratingRef = doc(collection(db, 'ratings'));
 
       await runTransaction(db, async (tx) => {
+        const rideSnap = await tx.get(rideRef);
+        if (rideSnap.data()?.userRating) return; // already rated — idempotency guard
         const driverSnap = await tx.get(driverRef);
         if (driverSnap.exists()) {
           const data = driverSnap.data();
@@ -1105,6 +1267,13 @@ const Home = () => {
             ratingCount: newCount
           });
         }
+        tx.set(ratingRef, {
+          driverId: matchedDriver.id,
+          userId: user.uid,
+          rideId: requestId,
+          rating,
+          timestamp: new Date()
+        });
         tx.update(rideRef, { status: 'finished', userRating: rating });
       });
 
@@ -1661,7 +1830,16 @@ const Home = () => {
                         const { label, color } = statusMeta(ride.status);
                         const isLogistics = ride.vehicleType === 'chhota_hathi';
                         return (
-                          <div key={ride.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                          <div key={ride.id} className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
+                            {ride.pickup?.lat && ride.destination?.lat && (
+                              <img
+                                src={`https://maps.googleapis.com/maps/api/staticmap?size=400x80&scale=2&maptype=roadmap&markers=color:blue%7C${ride.pickup.lat},${ride.pickup.lng}&markers=color:red%7C${ride.destination.lat},${ride.destination.lng}&path=color:0x3b82f6%7Cweight:2%7C${ride.pickup.lat},${ride.pickup.lng}%7C${ride.destination.lat},${ride.destination.lng}&key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}`}
+                                alt="route"
+                                className="w-full h-20 object-cover"
+                                loading="lazy"
+                              />
+                            )}
+                            <div className="p-4">
                             <div className="flex justify-between items-start mb-2">
                               <div className="flex items-center gap-2">
                                 <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg ${color}`}>{label}</span>
@@ -1693,6 +1871,7 @@ const Home = () => {
                               {ride.driverName && (
                                 <p className="text-[9px] font-bold text-slate-400">{ride.driverName}</p>
                               )}
+                            </div>
                             </div>
                           </div>
                         );
@@ -2510,6 +2689,10 @@ const Home = () => {
                 <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
                 <p className="font-black text-slate-700 text-sm">चालक की तलाश हो रही है...</p>
                 <p className="text-xs text-emerald-600 font-bold">आपकी सीट सुरक्षित है!</p>
+                <button onClick={handleCancelSharedBooking}
+                  className="mt-1 px-5 py-2 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest">
+                  रद्द करें
+                </button>
               </div>
             )}
           </>)}
@@ -2565,6 +2748,10 @@ const Home = () => {
               <button onClick={handleShareRide}
                 className="w-full py-3 border-2 border-emerald-400 text-emerald-600 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2">
                 <Share2 size={14} /> {t('shareFamily')}
+              </button>
+              <button onClick={handleCancelSharedBooking}
+                className="w-full py-3 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest">
+                बुकिंग रद्द करें
               </button>
             </div>
           )}

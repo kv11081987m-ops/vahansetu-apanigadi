@@ -67,20 +67,9 @@ export const AuthProvider = ({ children }) => {
       return;
     }
 
-    // localSid missing (e.g. back button / WebView cleared localStorage) — silently reclaim
-    if (!localSid) {
-      const newSid = crypto.randomUUID();
-      localStorage.setItem('vs_session_id', newSid);
-      try {
-        await updateDoc(doc(db, 'users', uid), { sessionId: newSid });
-      } catch (e) {
-        console.error('[AuthContext] session claim error:', e);
-      }
-      startSessionWatcher(uid, newSid);
-      return;
-    }
-
     // Conflict: another device has an active session
+    // Note: !localSid also falls here — treat as conflict so passenger/driver sees the modal
+    // instead of silently kicking the other device without consent.
     if (profile.role === 'driver') {
       setSessionConsentPending('driver');
     } else {

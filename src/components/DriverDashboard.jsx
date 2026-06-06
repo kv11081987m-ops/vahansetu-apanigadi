@@ -28,7 +28,6 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, auth } from '../services/firebase';
 import { collection, query, where, getDocs, getDoc, orderBy, limit, doc, updateDoc, onSnapshot, Timestamp, setDoc, serverTimestamp, runTransaction, addDoc, increment } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
 import { useRide } from '../context/RideContext';
 import { calculateDistance } from '../utils/geoUtils';
@@ -597,7 +596,7 @@ const DriverReferSection = ({ config, driverId, profile }) => {
 };
 
 const DriverDashboard = () => {
-  const { logout } = useAuth();
+  const { logout, user: authUser } = useAuth();
   const { config } = usePlatformConfig();
   const [stats, setStats] = useState({
     totalEarnings: 0,
@@ -642,15 +641,23 @@ const DriverDashboard = () => {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [isDriverCardMinimized, setIsDriverCardMinimized] = useState(false);
+  const [isSharedCardMinimized, setIsSharedCardMinimized] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isGrievanceOpen, setIsGrievanceOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [privateProfile, setPrivateProfile] = useState(null);
   const [earningsFilter, setEarningsFilter] = useState('all'); // 'today' | 'week' | 'month' | 'all'
   const [locationError, setLocationError] = useState(null);
+  const [showPassengerRating, setShowPassengerRating] = useState(false);
+  const [passengerRatingValue, setPassengerRatingValue] = useState(0);
+  const [hoveredPassengerRating, setHoveredPassengerRating] = useState(0);
+  const pendingRatingRideRef = useRef(null); // { rideId, passengerId }
+  const [acceptSecondsLeft, setAcceptSecondsLeft] = useState(null);
   const prevNewRequestIdRef = useRef(null);
   const profileLoadedRef = useRef(false);
   const mapRef = useRef(null);
+  const prevPassengerCountRef = useRef(0);
+  const activeSharedRideRef = useRef(null);
 
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
@@ -659,6 +666,9 @@ const DriverDashboard = () => {
 
 
   const prevNewRequestStatusRef = useRef(null);
+
+  // Keep ref in sync so GPS callback always has the latest shared ride id
+  useEffect(() => { activeSharedRideRef.current = activeSharedRide; }, [activeSharedRide]);
 
   // Reset card state and detect cancellation when newRequest changes
   useEffect(() => {
@@ -724,9 +734,9 @@ const DriverDashboard = () => {
             lastLocationUpdate: serverTimestamp()
           });
 
-          if (activeSharedRide?.id) {
+          if (activeSharedRideRef.current?.id) {
             try {
-              await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), {
+              await updateDoc(doc(db, 'shared_rides', activeSharedRideRef.current.id), {
                 driverLocation: { lat: latitude, lng: longitude },
                 driverHeading: heading || 0
               });
@@ -764,21 +774,16 @@ const DriverDashboard = () => {
 
     return () => navigator.geolocation.clearWatch(watchId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driverId, isOnline, activeSharedRide?.id]);
+  }, [driverId, isOnline]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      const id = user?.uid || TEST_DRIVER_ID;
-      if (id) {
-        setDriverId(id);
-        // isLoading stays true — profile onSnapshot will clear it
-      } else {
-        // No user and no test ID — stop loading
-        setIsLoading(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+    const id = authUser?.uid || TEST_DRIVER_ID;
+    if (id) {
+      setDriverId(id);
+    } else {
+      setIsLoading(false);
+    }
+  }, [authUser?.uid]);
 
   useEffect(() => {
     if (!driverId) return;
@@ -969,17 +974,19 @@ const DriverDashboard = () => {
     const recover = async () => {
       if (newRequestRef.current) return;
       try {
+        const twelveHoursAgo = Timestamp.fromMillis(Date.now() - 12 * 60 * 60 * 1000);
         const q = query(
           collection(db, 'ride_requests'),
-          where('driverId', '==', driverId)
+          where('driverId', '==', driverId),
+          where('createdAt', '>=', twelveHoursAgo),
+          limit(10)
         );
         const snap = await getDocs(q);
         if (!snap.empty && !newRequestRef.current) {
           const activeStatuses = ['accepted', 'started', 'completed', 'payment_done'];
-          const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
           const rides = snap.docs
             .map(d => ({ id: d.id, ...d.data() }))
-            .filter(d => activeStatuses.includes(d.status) && (d.createdAt?.toMillis?.() || 0) >= twelveHoursAgo);
+            .filter(d => activeStatuses.includes(d.status));
           rides.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
           const ride = rides[0];
           if (ride) {
@@ -992,6 +999,30 @@ const DriverDashboard = () => {
       }
     };
     recover();
+  }, [driverId]);
+
+  // On-mount recovery: restore active shared ride after page refresh
+  useEffect(() => {
+    if (!driverId) return;
+    const recoverShared = async () => {
+      if (activeSharedRide) return;
+      try {
+        const snap = await getDocs(
+          query(collection(db, 'shared_rides'), where('driverId', '==', driverId), where('status', '==', 'accepted'))
+        );
+        if (snap.empty) return;
+        const ride = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        setActiveSharedRide(ride);
+        setCurrentStopIndex(ride.currentStopIndex || 0);
+        if (ride.routeId) {
+          const routeDoc = await getDoc(doc(db, 'shared_routes', ride.routeId));
+          if (routeDoc.exists()) setRouteStops(routeDoc.data().stops || []);
+        }
+      } catch (err) {
+        console.error('Shared ride recovery error:', err);
+      }
+    };
+    recoverShared();
   }, [driverId]);
 
   // FCM: request permission, save token, handle foreground notifications
@@ -1045,19 +1076,53 @@ const DriverDashboard = () => {
     if (!activeSharedRide?.id) return;
     const unsub = onSnapshot(
       query(collection(db, 'shared_bookings'), where('rideId', '==', activeSharedRide.id)),
-      (snap) => setSharedPassengers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      (snap) => setSharedPassengers(
+        snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(d => d.status !== 'cancelled')
+      )
     );
     return () => unsub();
   }, [activeSharedRide?.id]);
 
+  // FIX 1: Notify driver when new passenger joins active shared ride
+  useEffect(() => {
+    if (!activeSharedRide?.id) return;
+    prevPassengerCountRef.current = activeSharedRide.passengers?.length || 0;
+    const unsub = onSnapshot(doc(db, 'shared_rides', activeSharedRide.id), (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+      const newCount = data.passengers?.length || 0;
+      const prevCount = prevPassengerCountRef.current;
+      if (newCount > prevCount) {
+        showToast(`नया यात्री जुड़ा! कुल ${newCount} यात्री`, 'success');
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        try {
+          const audio = new Audio('/notification.mp3');
+          audio.play().catch(() => {});
+        } catch (e) {}
+      }
+      prevPassengerCountRef.current = newCount;
+    });
+    return () => unsub();
+  }, [activeSharedRide?.id, showToast]);
+
   const handleAcceptSharedRide = async (ride) => {
     const vehicleNo = profile?.vehicleNumber || profile?.rcNumber || '';
-    await updateDoc(doc(db, 'shared_rides', ride.id), {
-      driverId: driverId,
-      status: 'accepted',
-      acceptedAt: new Date().toISOString(),
-      vehicleNumber: vehicleNo
-    });
+    try {
+      await runTransaction(db, async (txn) => {
+        const rideRef = doc(db, 'shared_rides', ride.id);
+        const snap = await txn.get(rideRef);
+        if (!snap.exists() || snap.data().driverId !== null) throw new Error('already_taken');
+        txn.update(rideRef, {
+          driverId, driverName: profile?.name || 'Partner',
+          status: 'accepted', acceptedAt: new Date().toISOString(), vehicleNumber: vehicleNo
+        });
+      });
+    } catch (e) {
+      if (e.message === 'already_taken') { showToast('Ye ride kisi aur driver ne le li.', 'error'); return; }
+      throw e;
+    }
     const bookingsSnap = await getDocs(
       query(collection(db, 'shared_bookings'), where('rideId', '==', ride.id), where('status', 'in', ['searching', 'booked']))
     );
@@ -1077,21 +1142,29 @@ const DriverDashboard = () => {
     await updateDoc(doc(db, 'shared_bookings', bookingId), { status: 'onboard' });
   };
 
-  const handleDropPassenger = async (bookingId, fare) => {
-    await updateDoc(doc(db, 'shared_bookings', bookingId), { status: 'done' });
-    const commission = fare * 0.10;
+  const handleDropPassenger = async (bookingId, fare, seats = 1) => {
+    const commission = Math.round(fare * (config.sharedCommission || config.commissionPercent || 10) / 100);
     const driverEarning = fare - commission;
-    await updateDoc(doc(db, 'drivers', driverId), {
-      walletBalance: increment(-commission),
-      totalEarnings: increment(fare)
-    });
+    try {
+      await runTransaction(db, async (txn) => {
+        const bookingRef = doc(db, 'shared_bookings', bookingId);
+        const snap = await txn.get(bookingRef);
+        if (!snap.exists() || snap.data().status === 'done') return; // already dropped
+        txn.update(bookingRef, { status: 'done' });
+        txn.update(doc(db, 'drivers', driverId), {
+          walletBalance: increment(-commission),
+          totalEarnings: increment(fare)
+        });
+        if (activeSharedRide?.id) {
+          txn.update(doc(db, 'shared_rides', activeSharedRide.id), { availableSeats: increment(seats) });
+        }
+      });
+    } catch { return; }
     await addDoc(collection(db, 'wallet_transactions'), {
-      driverId,
-      type: 'shared_ride_earning',
-      amount: driverEarning,
-      fare,
-      commission,
-      createdAt: new Date().toISOString()
+      driverId, type: 'shared_ride_earning', amount: driverEarning,
+      fare, commission, status: 'completed',
+      note: `Shared ride - Fare ₹${fare}, Commission ₹${commission}`,
+      createdAt: serverTimestamp()
     });
   };
 
@@ -1102,6 +1175,7 @@ const DriverDashboard = () => {
     setSharedPassengers([]);
     setRouteStops([]);
     setCurrentStopIndex(0);
+    setIsSharedCardMinimized(false);
   };
 
   const handleStopReached = async (stopIndex) => {
@@ -1111,10 +1185,42 @@ const DriverDashboard = () => {
       currentStopIndex: newIndex,
       currentStop: routeStops[newIndex]
     });
+
+    // FIX 3: Alert driver about passengers who need to be dropped at this stop
+    const currentStopName = routeStops[newIndex];
+    if (currentStopName) {
+      const autoDropSnap = await getDocs(
+        query(
+          collection(db, 'shared_bookings'),
+          where('rideId', '==', activeSharedRide.id),
+          where('dropStop', '==', currentStopName),
+          where('status', '==', 'onboard')
+        )
+      );
+      if (!autoDropSnap.empty) {
+        const count = autoDropSnap.docs.length;
+        showToast(`⚠️ ${count} यात्री यहाँ उतरने वाले हैं! Drop ज़रूर दबाएं।`, 'warning');
+        const rideIdForAutoDrop = activeSharedRide.id;
+        const docsForAutoDrop = autoDropSnap.docs.map(d => ({ id: d.id, fare: d.data().fare, seats: d.data().seats || 1 }));
+        setTimeout(async () => {
+          for (const bookingDoc of docsForAutoDrop) {
+            try {
+              const fresh = await getDoc(doc(db, 'shared_bookings', bookingDoc.id));
+              if (fresh.data()?.status === 'onboard') {
+                await handleDropPassenger(bookingDoc.id, bookingDoc.fare, bookingDoc.seats);
+                showToast('सीट स्वतः खाली कर दी गई', 'info');
+              }
+            } catch (e) {
+              console.error('Auto-drop error:', e);
+            }
+          }
+        }, 3 * 60 * 1000);
+      }
+    }
+
     const nextStop = routeStops[newIndex + 1];
     if (!nextStop) return;
-    const configDoc = await getDoc(doc(db, 'config', 'platform'));
-    const preReleaseMins = configDoc.data()?.seatPreReleaseMins || 2;
+    const preReleaseMins = config.seatPreReleaseMins || 2;
     const bookingsSnap = await getDocs(
       query(
         collection(db, 'shared_bookings'),
@@ -1182,10 +1288,10 @@ const DriverDashboard = () => {
         const rideRef = doc(db, 'ride_requests', newRequest.id);
         const rideSnap = await transaction.get(rideRef);
 
-        if (!rideSnap.exists()) throw "Ride does not exist";
+        if (!rideSnap.exists()) throw new Error("Ride does not exist");
 
         const data = rideSnap.data();
-        if (data.status !== 'pending') throw "Ride already accepted by someone else";
+        if (data.status !== 'pending') throw new Error("Ride already accepted by someone else");
 
         transaction.update(rideRef, {
           status: 'accepted',
@@ -1220,6 +1326,27 @@ const DriverDashboard = () => {
     setRejectReason('');
     setNewRequest(null);
   };
+
+  // Countdown timer for pending ride — auto-reject when time runs out
+  useEffect(() => {
+    if (newRequest?.status !== 'pending') {
+      setAcceptSecondsLeft(null);
+      return;
+    }
+    const timeout = config.rideAcceptTimeoutSecs ?? 30;
+    let remaining = timeout;
+    setAcceptSecondsLeft(remaining);
+    const interval = setInterval(() => {
+      remaining -= 1;
+      setAcceptSecondsLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(interval);
+        handleRejectRide();
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newRequest?.id, newRequest?.status]);
 
   const handleVerifyOtp = async () => {
     if (!newRequest || !driverId) return;
@@ -1372,6 +1499,7 @@ const DriverDashboard = () => {
           amount,
           type: 'withdrawn',
           status: 'pending',
+          withdrawalRequestId: withdrawalRef.id,
           createdAt: serverTimestamp(),
           note: `Withdrawal to ${upiId}`
         });
@@ -1384,6 +1512,50 @@ const DriverDashboard = () => {
     } catch (err) {
       console.error(err);
       showToast('Error: ' + err.message, 'error');
+    }
+  };
+
+  const handleCancelAcceptedRide = async () => {
+    if (!newRequest || !driverId) return;
+    const threshold = config.cancelPenaltyThreshold ?? 3;
+    const penalty = config.cancelPenaltyAmount ?? 10;
+    const today = new Date().toISOString().split('T')[0];
+    const rideId = newRequest.id;
+    try {
+      let shouldPenalise = false;
+      let newCount = 1;
+      await runTransaction(db, async (txn) => {
+        const driverRef = doc(db, 'drivers', driverId);
+        const driverSnap = await txn.get(driverRef);
+        if (!driverSnap.exists()) throw new Error('driver_not_found');
+        const d = driverSnap.data();
+        const prevDate = d.cancelDate || '';
+        const prevCount = prevDate === today ? (d.cancelCount || 0) : 0;
+        newCount = prevCount + 1;
+        shouldPenalise = newCount > threshold;
+        const driverUpdate = { cancelDate: today, cancelCount: newCount };
+        if (shouldPenalise) driverUpdate.walletBalance = increment(-penalty);
+        txn.update(driverRef, driverUpdate);
+        txn.update(doc(db, 'ride_requests', rideId), {
+          status: 'cancelled',
+          cancelledBy: 'driver',
+          cancelledReason: 'driver_cancelled_after_accept'
+        });
+      });
+      if (shouldPenalise) {
+        await addDoc(collection(db, 'wallet_transactions'), {
+          driverId, amount: penalty, type: 'cancel_penalty', status: 'completed',
+          note: `Ride cancel penalty — aaj ${newCount}th cancellation`,
+          createdAt: serverTimestamp()
+        });
+        showToast(`Ride cancel ki. ₹${penalty} penalty kat gayi (aaj ${newCount}th cancel).`, 'error');
+      } else {
+        showToast(`Ride cancel ki (aaj ${newCount}/${threshold} free cancellations).`, 'info');
+      }
+      setNewRequest(null);
+    } catch (err) {
+      console.error('Cancel accepted ride error:', err);
+      showToast('Cancel nahi ho saka. Dobara try karein.', 'error');
     }
   };
 
@@ -1410,10 +1582,47 @@ const DriverDashboard = () => {
     localStorage.removeItem('pendingPaymentRideId');
     try {
       await updateDoc(doc(db, 'ride_requests', rideId), { status: 'finished' });
+      dismissedRideIdRef.current = null;
     } catch (e) { console.error('handleDoneRide error:', e); }
-    // Clear dismissedRideIdRef after Firestore confirms 'finished' so the ref
-    // doesn't permanently block a hypothetical future ride with the same ID.
-    dismissedRideIdRef.current = null;
+  };
+
+  // Show passenger rating modal before clearing the ride
+  const handleShowPassengerRating = () => {
+    if (!newRequest) return;
+    pendingRatingRideRef.current = { rideId: newRequest.id, passengerId: newRequest.userId };
+    setPassengerRatingValue(0);
+    setHoveredPassengerRating(0);
+    setShowPassengerRating(true);
+  };
+
+  const handleFinishWithRating = async (rating) => {
+    setShowPassengerRating(false);
+    const rideData = pendingRatingRideRef.current;
+    pendingRatingRideRef.current = null;
+    if (rideData?.rideId && rideData?.passengerId && rating > 0) {
+      try {
+        await addDoc(collection(db, 'ratings'), {
+          rideId: rideData.rideId,
+          driverId,
+          passengerId: rideData.passengerId,
+          passengerRating: rating,
+          type: 'passenger',
+          createdAt: serverTimestamp()
+        });
+        const userSnap = await getDoc(doc(db, 'users', rideData.passengerId));
+        if (userSnap.exists()) {
+          const d = userSnap.data();
+          const count = d.passengerRatingCount || 0;
+          const avg = d.passengerRating || 5.0;
+          const newAvg = count === 0 ? rating : Math.round(((avg * count) + rating) / (count + 1) * 10) / 10;
+          await updateDoc(doc(db, 'users', rideData.passengerId), {
+            passengerRating: newAvg,
+            passengerRatingCount: increment(1)
+          });
+        }
+      } catch (e) { console.error('Passenger rating error:', e); }
+    }
+    await handleDoneRide();
   };
 
   // nav labels now via i18n t() — cur kept for any remaining references
@@ -1744,6 +1953,65 @@ const DriverDashboard = () => {
         )}
       </AnimatePresence>
 
+      {/* Passenger Rating Modal */}
+      <AnimatePresence>
+        {showPassengerRating && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[3000] flex items-end justify-center p-4"
+          >
+            <motion.div
+              initial={{ y: 60, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 60, opacity: 0 }}
+              className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm shadow-2xl"
+            >
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-amber-50 rounded-[1.5rem] flex items-center justify-center mx-auto mb-4">
+                  <Star size={32} className="text-amber-400" fill="currentColor" />
+                </div>
+                <h3 className="text-lg font-black text-slate-800">Passenger Ko Rate Karein</h3>
+                <p className="text-[11px] font-bold text-slate-400 mt-1">Aaj ka anubhav kaisa raha?</p>
+              </div>
+              <div className="flex justify-center gap-3 mb-8">
+                {[1, 2, 3, 4, 5].map(star => (
+                  <button
+                    key={star}
+                    onClick={() => setPassengerRatingValue(star)}
+                    onMouseEnter={() => setHoveredPassengerRating(star)}
+                    onMouseLeave={() => setHoveredPassengerRating(0)}
+                    className="active:scale-90 transition-transform"
+                  >
+                    <Star
+                      size={36}
+                      className={`transition-colors ${star <= (hoveredPassengerRating || passengerRatingValue) ? 'text-amber-400' : 'text-slate-200'}`}
+                      fill={star <= (hoveredPassengerRating || passengerRatingValue) ? 'currentColor' : 'none'}
+                    />
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => handleFinishWithRating(0)}
+                  className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all"
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={() => handleFinishWithRating(passengerRatingValue)}
+                  disabled={passengerRatingValue === 0}
+                  className="flex-[2] py-4 bg-amber-400 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-amber-400/30 active:scale-95 transition-all disabled:opacity-40"
+                >
+                  Rating Submit
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* GPS — Meri Location Button */}
       <div className="fixed right-4 z-10 flex flex-col items-end gap-2" style={{ bottom: '8.5rem' }}>
         {locationError && (
@@ -1804,80 +2072,92 @@ const DriverDashboard = () => {
             </div>
           ) : (
             <div className="bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden max-h-[70vh] flex flex-col">
-              <div className="bg-blue-600 px-5 py-3 shrink-0">
-                <p className="text-white font-black text-sm">{activeSharedRide.routeName}</p>
-                <p className="text-blue-200 text-[10px] font-bold uppercase tracking-widest">सक्रिय साझी यात्रा</p>
-              </div>
-              {routeStops.length > 0 && (
-                <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 shrink-0">
-                  <div className="flex items-center gap-1 flex-wrap gap-y-1">
-                    {routeStops.map((stop, idx) => (
-                      <React.Fragment key={idx}>
-                        <span className={`text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap ${
-                          idx < currentStopIndex ? 'bg-emerald-100 text-emerald-600' :
-                          idx === currentStopIndex ? 'bg-blue-600 text-white' :
-                          'bg-slate-200 text-slate-400'
-                        }`}>{idx < currentStopIndex ? '✓ ' : ''}{stop}</span>
-                        {idx < routeStops.length - 1 && <span className="text-slate-300 text-[9px]">→</span>}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                  {routeStops[currentStopIndex + 1] && (
-                    <p className="text-[10px] font-bold text-blue-500 mt-1.5">{t('nextStop')}: {routeStops[currentStopIndex + 1]}</p>
-                  )}
+              <div className="bg-blue-600 px-5 py-3 shrink-0 flex items-center justify-between">
+                <div>
+                  <p className="text-white font-black text-sm">{activeSharedRide.routeName}</p>
+                  <p className="text-blue-200 text-[10px] font-bold uppercase tracking-widest">सक्रिय साझी यात्रा</p>
                 </div>
-              )}
-              <div className="p-4 flex flex-col gap-3 overflow-y-auto flex-1">
-                {sharedPassengers.length === 0 ? (
-                  <p className="text-center text-slate-400 text-sm font-bold py-4">यात्री लोड हो रहे हैं...</p>
-                ) : (
-                  sharedPassengers.map(p => (
-                    <div key={p.id} className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <p className="text-sm font-black text-slate-800">{p.passengerName}</p>
-                          <p className="text-[10px] text-slate-400 font-bold">चढ़ना: {p.boardingStop} → उतरना: {p.dropStop}</p>
-                          <p className="text-[10px] text-slate-400 font-bold">सीटें: {p.seats || 1}</p>
-                          <p className="text-sm font-black text-blue-600">₹{p.fare}</p>
-                        </div>
-                        <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
-                          p.status === 'onboard' ? 'bg-emerald-100 text-emerald-600' :
-                          p.status === 'done' ? 'bg-slate-200 text-slate-500' :
-                          'bg-amber-100 text-amber-600'
-                        }`}>{p.status === 'driver_assigned' ? 'प्रतीक्षा' : p.status === 'onboard' ? 'सवार' : p.status === 'done' ? 'उतरे' : p.status}</span>
+                <button
+                  onClick={() => setIsSharedCardMinimized(prev => !prev)}
+                  className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center text-white font-black text-lg"
+                >
+                  {isSharedCardMinimized ? '▲' : '▼'}
+                </button>
+              </div>
+              {!isSharedCardMinimized && (
+                <>
+                  {routeStops.length > 0 && (
+                    <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 shrink-0">
+                      <div className="flex items-center gap-1 flex-wrap gap-y-1">
+                        {routeStops.map((stop, idx) => (
+                          <React.Fragment key={idx}>
+                            <span className={`text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap ${
+                              idx < currentStopIndex ? 'bg-emerald-100 text-emerald-600' :
+                              idx === currentStopIndex ? 'bg-blue-600 text-white' :
+                              'bg-slate-200 text-slate-400'
+                            }`}>{idx < currentStopIndex ? '✓ ' : ''}{stop}</span>
+                            {idx < routeStops.length - 1 && <span className="text-slate-300 text-[9px]">→</span>}
+                          </React.Fragment>
+                        ))}
                       </div>
-                      {p.status === 'driver_assigned' && p.boardingStop === routeStops[currentStopIndex] && (
-                        <button onClick={() => handlePickupPassenger(p.id)}
-                          className="w-full py-2 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
-                          {t('pickupDone')}
-                        </button>
-                      )}
-                      {p.status === 'onboard' && p.dropStop === routeStops[currentStopIndex] && (
-                        <button onClick={() => handleDropPassenger(p.id, p.fare)}
-                          className="w-full py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
-                          {t('dropDone')}
-                        </button>
+                      {routeStops[currentStopIndex + 1] && (
+                        <p className="text-[10px] font-bold text-blue-500 mt-1.5">{t('nextStop')}: {routeStops[currentStopIndex + 1]}</p>
                       )}
                     </div>
-                  ))
-                )}
-              </div>
-              <div className="p-4 shrink-0 border-t border-slate-100 flex flex-col gap-2">
-                {routeStops.length > 0 && (
-                  <button
-                    onClick={() => handleStopReached(currentStopIndex)}
-                    disabled={currentStopIndex >= routeStops.length - 1}
-                    className="w-full py-3 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-40">
-                    {t('stopReached')}
-                  </button>
-                )}
-                {sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done') && (
-                  <button onClick={handleCompleteSharedTrip}
-                    className="w-full py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest">
-                    {t('tripComplete')} ✓
-                  </button>
-                )}
-              </div>
+                  )}
+                  <div className="p-4 flex flex-col gap-3 overflow-y-auto flex-1">
+                    {sharedPassengers.length === 0 ? (
+                      <p className="text-center text-slate-400 text-sm font-bold py-4">यात्री लोड हो रहे हैं...</p>
+                    ) : (
+                      sharedPassengers.map(p => (
+                        <div key={p.id} className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                          <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <p className="text-sm font-black text-slate-800">{p.passengerName}</p>
+                              <p className="text-[10px] text-slate-400 font-bold">चढ़ना: {p.boardingStop} → उतरना: {p.dropStop}</p>
+                              <p className="text-[10px] text-slate-400 font-bold">सीटें: {p.seats || 1}</p>
+                              <p className="text-sm font-black text-blue-600">₹{p.fare}</p>
+                            </div>
+                            <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${
+                              p.status === 'onboard' ? 'bg-emerald-100 text-emerald-600' :
+                              p.status === 'done' ? 'bg-slate-200 text-slate-500' :
+                              'bg-amber-100 text-amber-600'
+                            }`}>{p.status === 'driver_assigned' ? 'प्रतीक्षा' : p.status === 'onboard' ? 'सवार' : p.status === 'done' ? 'उतरे' : p.status}</span>
+                          </div>
+                          {p.status === 'driver_assigned' && p.boardingStop === routeStops[currentStopIndex] && (
+                            <button onClick={() => handlePickupPassenger(p.id)}
+                              className="w-full py-2 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
+                              {t('pickupDone')}
+                            </button>
+                          )}
+                          {p.status === 'onboard' && p.dropStop === routeStops[currentStopIndex] && (
+                            <button onClick={() => handleDropPassenger(p.id, p.fare, p.seats || 1)}
+                              className="w-full py-2 bg-emerald-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest">
+                              {t('dropDone')}
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="p-4 shrink-0 border-t border-slate-100 flex flex-col gap-2">
+                    {routeStops.length > 0 && (
+                      <button
+                        onClick={() => handleStopReached(currentStopIndex)}
+                        disabled={currentStopIndex >= routeStops.length - 1}
+                        className="w-full py-3 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-40">
+                        {t('stopReached')}
+                      </button>
+                    )}
+                    {sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done') && (
+                      <button onClick={handleCompleteSharedTrip}
+                        className="w-full py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest">
+                        {t('tripComplete')} ✓
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1928,6 +2208,11 @@ const DriverDashboard = () => {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="bg-white/20 px-3 py-1 rounded-xl text-sm font-black">₹{newRequest.fare}</span>
+                    {newRequest.status === 'pending' && acceptSecondsLeft != null && (
+                      <span className={`px-2.5 py-1 rounded-xl text-sm font-black ${acceptSecondsLeft <= 10 ? 'bg-red-500/80 animate-pulse' : 'bg-white/20'}`}>
+                        {acceptSecondsLeft}s
+                      </span>
+                    )}
                     {(newRequest.status === 'accepted' || newRequest.status === 'started') && (
                       <button onClick={() => setIsDriverCardMinimized(true)} className="w-7 h-7 bg-white/20 rounded-lg flex items-center justify-center">
                         <ChevronRight className="rotate-90" size={13} />
@@ -1949,6 +2234,19 @@ const DriverDashboard = () => {
                       <p className="text-xs font-bold text-slate-400 truncate">{newRequest.destination?.address || 'Destination'}</p>
                     </div>
                   </div>
+
+                  {/* Passenger info strip — only on pending */}
+                  {newRequest.status === 'pending' && (newRequest.userName || newRequest.passengerRating) && (
+                    <div className="flex items-center justify-between bg-slate-50 rounded-2xl px-4 py-2.5 mb-3">
+                      <span className="text-xs font-black text-slate-700 truncate">{newRequest.userName || 'Passenger'}</span>
+                      {newRequest.passengerRating && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Star size={12} className="text-amber-400" fill="currentColor" />
+                          <span className="text-xs font-black text-amber-500">{Number(newRequest.passengerRating).toFixed(1)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Action buttons */}
                   <div className="flex flex-col gap-2.5 pb-4">
@@ -2007,6 +2305,22 @@ const DriverDashboard = () => {
                             <Phone size={14} /> यात्री को कॉल करें
                           </button>
                         )}
+                        {(() => {
+                          const today = new Date().toISOString().split('T')[0];
+                          const prevDate = profile?.cancelDate || '';
+                          const usedToday = prevDate === today ? (profile?.cancelCount || 0) : 0;
+                          const threshold = config.cancelPenaltyThreshold ?? 3;
+                          const penalty = config.cancelPenaltyAmount ?? 10;
+                          const willPenalise = usedToday + 1 > threshold;
+                          return (
+                            <button
+                              onClick={handleCancelAcceptedRide}
+                              className="w-full py-3 border border-red-200 text-red-500 rounded-2xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all"
+                            >
+                              {willPenalise ? `Ride Cancel (₹${penalty} penalty lagegi)` : `Ride Cancel (${usedToday}/${threshold} free)`}
+                            </button>
+                          );
+                        })()}
                       </div>
                     )}
                     {newRequest.status === 'started' && newRequest.driverId === driverId && (
@@ -2059,7 +2373,7 @@ const DriverDashboard = () => {
                           <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">✓ भुगतान पुष्ट</p>
                         </div>
                         <button
-                          onClick={handleDoneRide}
+                          onClick={handleShowPassengerRating}
                           className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all"
                         >
                           अगली सवारी के लिए तैयार
@@ -2274,7 +2588,7 @@ const DriverDashboard = () => {
                 <p className="text-2xl font-black text-slate-800">₹{Number(stats.totalEarnings || 0).toFixed(0)}</p>
               </div>
               <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Platform Fee (8%)</p>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Platform Fee ({config.commissionPercent || 8}%)</p>
                 <p className="text-2xl font-black text-red-500">₹{Math.round((stats.totalEarnings || 0) * ((config.commissionPercent || 8) / 100)) || 0}</p>
               </div>
             </div>
@@ -2295,29 +2609,38 @@ const DriverDashboard = () => {
                 }).map(tx => {
                   const isCash = tx.type === 'commission_deducted';
                   const isOnline = tx.type === 'online_earned' || tx.type === 'earned';
+                  const isShared = tx.type === 'shared_ride_earning';
+                  const isAdminCredit = tx.type === 'admin_credit';
                   const isWithdrawal = tx.type === 'withdrawn';
+                  const isCancelPenalty = tx.type === 'cancel_penalty';
                   return (
                     <div key={tx.id} className="bg-white p-4 rounded-3xl border border-slate-100 flex items-center gap-3">
                       <div className={`w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 ${
-                        isCash      ? 'bg-amber-50 text-amber-600' :
-                        isOnline    ? 'bg-emerald-50 text-emerald-600' :
-                        isWithdrawal? 'bg-red-50 text-red-500' :
-                                      'bg-slate-50 text-slate-400'
+                        isCash          ? 'bg-amber-50 text-amber-600' :
+                        isOnline        ? 'bg-emerald-50 text-emerald-600' :
+                        isShared        ? 'bg-violet-50 text-violet-600' :
+                        isAdminCredit   ? 'bg-blue-50 text-blue-600' :
+                        isCancelPenalty ? 'bg-orange-50 text-orange-500' :
+                        isWithdrawal    ? 'bg-red-50 text-red-500' :
+                                          'bg-slate-50 text-slate-400'
                       }`}>
-                        {isCash       ? <IndianRupee size={18} /> :
-                         isOnline     ? <TrendingUp size={18} /> :
-                         isWithdrawal ? <AlertCircle size={18} /> :
-                                        <IndianRupee size={18} />}
+                        {isCash          ? <IndianRupee size={18} /> :
+                         isOnline        ? <TrendingUp size={18} /> :
+                         isShared        ? <TrendingUp size={18} /> :
+                         isAdminCredit   ? <TrendingUp size={18} /> :
+                         isCancelPenalty ? <AlertCircle size={18} /> :
+                         isWithdrawal    ? <AlertCircle size={18} /> :
+                                           <IndianRupee size={18} />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="text-xs font-black text-slate-800">
-                            {isCash ? 'Nagad Sawari' : isOnline ? 'Online Sawari' : isWithdrawal ? 'Nikasi' : tx.type}
+                            {isCash ? 'Nagad Sawari' : isOnline ? 'Online Sawari' : isShared ? 'Saanjhi Sawari' : isAdminCredit ? 'Admin Credit' : isCancelPenalty ? 'Cancel Penalty' : isWithdrawal ? 'Nikasi' : tx.type}
                           </p>
                           <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wide ${
-                            isCash ? 'bg-amber-100 text-amber-700' : isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'
+                            isCash ? 'bg-amber-100 text-amber-700' : isOnline ? 'bg-emerald-100 text-emerald-700' : isShared ? 'bg-violet-100 text-violet-700' : isAdminCredit ? 'bg-blue-100 text-blue-700' : isCancelPenalty ? 'bg-orange-100 text-orange-600' : 'bg-red-100 text-red-600'
                           }`}>
-                            {isCash ? 'CASH' : isOnline ? 'ONLINE' : 'WITHDRAWAL'}
+                            {isCash ? 'CASH' : isOnline ? 'ONLINE' : isShared ? 'SHARED' : isAdminCredit ? 'CREDIT' : isCancelPenalty ? 'PENALTY' : 'WITHDRAWAL'}
                           </span>
                         </div>
                         {isCash && tx.fareCollected && (
@@ -2330,12 +2653,15 @@ const DriverDashboard = () => {
                             Fare: ₹{tx.fareCollected} · Credited: +₹{tx.amount}
                           </p>
                         )}
+                        {(isShared || isAdminCredit || isCancelPenalty) && tx.note && (
+                          <p className="text-[9px] font-bold text-slate-500">{tx.note}</p>
+                        )}
                         <p className="text-[9px] text-slate-300">{tx.createdAt?.toDate?.()?.toLocaleString('en-IN') || 'Abhi'}</p>
                       </div>
                       <div className={`text-sm font-black flex-shrink-0 ${
-                        isOnline ? 'text-emerald-600' : isCash ? 'text-amber-700' : 'text-red-500'
+                        isOnline || isAdminCredit ? 'text-emerald-600' : isShared ? 'text-violet-600' : isCash ? 'text-amber-700' : 'text-red-500'
                       }`}>
-                        {isOnline ? `+₹${tx.amount}` : `-₹${tx.amount}`}
+                        {isOnline || isShared || isAdminCredit ? `+₹${tx.amount}` : `-₹${tx.amount}`}
                       </div>
                     </div>
                   );

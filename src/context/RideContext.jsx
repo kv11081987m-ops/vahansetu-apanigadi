@@ -56,10 +56,16 @@ export const RideProvider = ({ children }) => {
       );
       const unsub1 = onSnapshot(q1, (snapshot) => {
         const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
+        const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
         const activeStatuses = ['accepted', 'started', 'completed', 'payment_done', 'paid'];
         const rides = snapshot.docs
           .map(d => ({ id: d.id, ...d.data() }))
-          .filter(d => activeStatuses.includes(d.status) && (d.createdAt?.toMillis() || 0) >= twelveHoursAgo)
+          .filter(d => {
+            if (!activeStatuses.includes(d.status)) return false;
+            const createdAt = d.createdAt?.toMillis() || 0;
+            if (['payment_done', 'paid', 'completed'].includes(d.status)) return createdAt >= twoHoursAgo;
+            return createdAt >= twelveHoursAgo;
+          })
           .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
         rideDataFromOwn = rides[0] || null;
         mergeAndSet();
@@ -100,17 +106,17 @@ export const RideProvider = ({ children }) => {
     }
 
     // Passenger query — single equality clause, client-side filtering avoids composite index.
-    // limit(50) caps download size; active rides are always among the most recent.
+    // limit(100) reduces the chance of missing an active ride for heavy users.
     const q = query(
       collection(db, 'ride_requests'),
       where('userId', '==', user.uid),
-      limit(50)
+      limit(100)
     );
 
     const unsub = onSnapshot(q, (snapshot) => {
       if (!snapshot.empty) {
         const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
-        const eightHoursAgo = Date.now() - 8 * 60 * 60 * 1000;
+        const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
         const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000;
         const docs = snapshot.docs
           .map(d => ({ id: d.id, ...d.data() }))
@@ -119,7 +125,7 @@ export const RideProvider = ({ children }) => {
             if (!d.status || !validStatuses.includes(d.status)) return false;
             const createdAt = d.createdAt?.toMillis() || 0;
             if (d.status === 'pending' && createdAt < thirtyMinAgo) return false;
-            if (['completed', 'payment_done'].includes(d.status) && createdAt < eightHoursAgo) return false;
+            if (['completed', 'payment_done'].includes(d.status) && createdAt < twoHoursAgo) return false;
             if (['accepted', 'started'].includes(d.status) && createdAt < fourHoursAgo) return false;
             return true;
           });

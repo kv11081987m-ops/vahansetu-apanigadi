@@ -31,7 +31,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
 import { QRCodeCanvas } from 'qrcode.react';
 import { db } from '../services/firebase';
-import { collection, query, onSnapshot, orderBy, limit, doc, updateDoc, addDoc, serverTimestamp, increment, setDoc, getDoc, writeBatch, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, onSnapshot, orderBy, limit, doc, updateDoc, addDoc, serverTimestamp, increment, setDoc, getDoc, writeBatch, deleteDoc, getCountFromServer } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 
 const AdminDashboard = () => {
@@ -86,6 +86,9 @@ const AdminDashboard = () => {
     sharedOperatingStart: '07:00',
     sharedOperatingEnd: '20:00',
     seatPreReleaseMins: 2,
+    cancelPenaltyThreshold: 3,
+    cancelPenaltyAmount: 10,
+    rideAcceptTimeoutSecs: 30,
   });
   const [configSaving, setConfigSaving] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
@@ -96,6 +99,8 @@ const AdminDashboard = () => {
   const [newRoute, setNewRoute] = useState({ name: '', stops: ['', ''], fares: [10], isActive: true });
   const [driverPrivateData, setDriverPrivateData] = useState({}); // driverId → { adminTempAccess }
   const [referrals, setReferrals] = useState([]);
+  const [liveSharedRides, setLiveSharedRides] = useState([]);
+  const [liveSharedBookings, setLiveSharedBookings] = useState([]);
   const [toast, setToast] = useState(null);
 
   const showToast = (msg, type = 'success') => {
@@ -134,29 +139,29 @@ const AdminDashboard = () => {
       }
     });
 
-    // 2. Users Count
-    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      setStats(prev => ({ ...prev, totalUsers: snapshot.size }));
-    });
+    // 2. Users Count — getCountFromServer avoids downloading all user docs
+    getCountFromServer(query(collection(db, 'users'))).then(snap => {
+      setStats(prev => ({ ...prev, totalUsers: snap.data().count }));
+    }).catch(console.error);
+    const unsubUsers = () => {}; // no-op — count is one-shot, no listener to clean up
 
-    // 3. Rides & Revenue Listener
+    // 3. Rides & Revenue Listener (last 500 for display + revenue)
     const unsubRides = onSnapshot(query(collection(db, 'ride_requests'), orderBy('createdAt', 'desc'), limit(500)), (snapshot) => {
       const rides = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRecentRides(rides);
-      
       let revenue = 0;
       rides.forEach(ride => {
         if (ride.status === 'paid' || ride.status === 'payment_done') {
           revenue += (parseInt(ride.fareAmount) || parseInt(ride.fare) || 0);
         }
       });
-      
-      setStats(prev => ({ 
-        ...prev, 
-        totalRides: rides.length,
-        totalRevenue: revenue
-      }));
+      setStats(prev => ({ ...prev, totalRevenue: revenue }));
     });
+
+    // Accurate total ride count (not capped at 500)
+    getCountFromServer(query(collection(db, 'ride_requests'))).then(snap => {
+      setStats(prev => ({ ...prev, totalRides: snap.data().count }));
+    }).catch(console.error);
 
     // 4. Payout Requests Listener
     const unsubPayouts = onSnapshot(query(collection(db, 'withdrawal_requests'), orderBy('createdAt', 'desc')), (snapshot) => {
@@ -183,6 +188,18 @@ const AdminDashboard = () => {
       }
     );
 
+    // 8. Live Shared Rides (waiting + accepted)
+    const unsubLiveShared = onSnapshot(
+      query(collection(db, 'shared_rides'), where('status', 'in', ['waiting', 'accepted'])),
+      (snap) => setLiveSharedRides(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+
+    // 9. Live Shared Bookings (searching + booked + onboard)
+    const unsubLiveBookings = onSnapshot(
+      query(collection(db, 'shared_bookings'), where('status', 'in', ['searching', 'driver_assigned', 'booked', 'onboard'])),
+      (snap) => setLiveSharedBookings(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+
     return () => {
       unsubDrivers();
       unsubUsers();
@@ -191,6 +208,8 @@ const AdminDashboard = () => {
       unsubConfig();
       unsubReferrals();
       unsubSharedRoutes();
+      unsubLiveShared();
+      unsubLiveBookings();
     };
   }, []);
 
@@ -305,23 +324,36 @@ const AdminDashboard = () => {
   const handleCompletePayout = async (req) => {
     try {
       // 1. Mark withdrawal as completed
-      await updateDoc(doc(db, 'withdrawal_requests', req.id), { 
+      await updateDoc(doc(db, 'withdrawal_requests', req.id), {
         status: 'completed',
         paidAt: serverTimestamp()
       });
 
-      // NOTE: We DO NOT deduct from walletBalance here because it is 
-      // already deducted in DriverDashboard.jsx at the time of request.
-
-      // 3. Add transaction record
-      await addDoc(collection(db, 'wallet_transactions'), {
-        driverId: req.driverId,
-        amount: req.amount,
-        type: 'withdrawn',
-        status: 'completed',
-        note: 'Withdrawal processed by admin',
-        createdAt: serverTimestamp()
-      });
+      // 2. Update existing pending wallet_transaction (do NOT addDoc — that creates a duplicate)
+      // First try to match by withdrawalRequestId (set by newer handleWithdrawRequest).
+      // Fall back to driverId+type+amount match for older docs that lack the field.
+      let txSnap = await getDocs(
+        query(collection(db, 'wallet_transactions'),
+          where('withdrawalRequestId', '==', req.id)
+        )
+      );
+      if (txSnap.empty) {
+        txSnap = await getDocs(
+          query(collection(db, 'wallet_transactions'),
+            where('driverId', '==', req.driverId),
+            where('type', '==', 'withdrawn'),
+            where('status', '==', 'pending'),
+            where('amount', '==', req.amount)
+          )
+        );
+      }
+      if (!txSnap.empty) {
+        await updateDoc(doc(db, 'wallet_transactions', txSnap.docs[0].id), {
+          status: 'completed',
+          note: 'Withdrawal processed by admin',
+          paidAt: serverTimestamp()
+        });
+      }
 
       showToast("Payout marked as completed successfully!");
     } catch (err) {
@@ -362,20 +394,21 @@ const AdminDashboard = () => {
   const handleNuclearCleanup = async () => {
     if (!window.confirm("DANGEROUS: This will cancel ALL active/pending rides across the entire system. Proceed?")) return;
     try {
-      const activeRides = recentRides.filter(r => ['pending', 'accepted', 'started', 'completed', 'payment_done'].includes(r.status));
-      const BATCH_LIMIT = 500;
-      for (let i = 0; i < activeRides.length; i += BATCH_LIMIT) {
-        const batch = writeBatch(db);
-        activeRides.slice(i, i + BATCH_LIMIT).forEach(ride => {
-          batch.update(doc(db, 'ride_requests', ride.id), {
-            status: 'cancelled',
-            cancelledBy: 'admin_nuclear',
-            cancelledAt: serverTimestamp()
-          });
-        });
-        await batch.commit();
+      const activeStatuses = ['pending', 'accepted', 'started', 'completed', 'payment_done'];
+      let totalCleared = 0;
+      for (const status of activeStatuses) {
+        let hasMore = true;
+        while (hasMore) {
+          const snap = await getDocs(query(collection(db, 'ride_requests'), where('status', '==', status), limit(500)));
+          if (snap.empty) { hasMore = false; break; }
+          const batch = writeBatch(db);
+          snap.docs.forEach(d => batch.update(doc(db, 'ride_requests', d.id), { status: 'cancelled', cancelledBy: 'admin_nuclear', cancelledAt: serverTimestamp() }));
+          await batch.commit();
+          totalCleared += snap.docs.length;
+          if (snap.docs.length < 500) hasMore = false;
+        }
       }
-      showToast(`Cleanup complete! ${activeRides.length} rides cleared.`);
+      showToast(`Cleanup complete! ${totalCleared} rides cleared.`);
     } catch (err) {
       console.error(err);
     }
@@ -436,7 +469,8 @@ const AdminDashboard = () => {
     const totalRevenue = completedRides.reduce(
       (sum, r) => sum + (parseInt(r.fareAmount) || parseInt(r.fare) || 0), 0
     );
-    const platformCommission = Math.round(totalRevenue * 0.08);
+    const commissionRate = (platformConfig.commissionPercent || 8) / 100;
+    const platformCommission = Math.round(totalRevenue * commissionRate);
     const driverPayouts = totalRevenue - platformCommission;
 
     const driverMap = {};
@@ -504,7 +538,7 @@ const AdminDashboard = () => {
     <div class="box"><div class="lbl">Completed</div><div class="val green">${completedRides.length}</div></div>
     <div class="box"><div class="lbl">Cancelled</div><div class="val orange">${cancelledRides.length}</div></div>
     <div class="box"><div class="lbl">Gross Revenue</div><div class="val">₹${totalRevenue.toLocaleString('en-IN')}</div></div>
-    <div class="box"><div class="lbl">Platform (8%)</div><div class="val green">₹${platformCommission.toLocaleString('en-IN')}</div></div>
+    <div class="box"><div class="lbl">Platform (${(platformConfig.commissionPercent || 8)}%)</div><div class="val green">₹${platformCommission.toLocaleString('en-IN')}</div></div>
     <div class="box"><div class="lbl">Driver Payouts</div><div class="val">₹${driverPayouts.toLocaleString('en-IN')}</div></div>
     <div class="box"><div class="lbl">Active Drivers</div><div class="val blue">${Object.keys(driverMap).length}</div></div>
     <div class="box"><div class="lbl">Withdrawals</div><div class="val orange">${monthPayouts.length}</div></div>
@@ -513,7 +547,7 @@ const AdminDashboard = () => {
   <h2>Driver Performance</h2>
   ${driverRows.length > 0 ? `
   <table>
-    <thead><tr><th>#</th><th>Driver</th><th>Rides</th><th>Gross</th><th>Net (92.5%)</th></tr></thead>
+    <thead><tr><th>#</th><th>Driver</th><th>Rides</th><th>Gross</th><th>Net (${(100 - (platformConfig.commissionPercent || 8))}%)</th></tr></thead>
     <tbody>
       ${driverRows.map(([name, d], i) => `
       <tr>
@@ -521,7 +555,7 @@ const AdminDashboard = () => {
         <td><strong>${name}</strong></td>
         <td>${d.rides}</td>
         <td>₹${d.earnings.toLocaleString('en-IN')}</td>
-        <td>₹${Math.round(d.earnings * 0.92).toLocaleString('en-IN')}</td>
+        <td>₹${Math.round(d.earnings * (1 - commissionRate)).toLocaleString('en-IN')}</td>
       </tr>`).join('')}
     </tbody>
   </table>` : '<p style="color:#64748b;padding:12px 0">No completed rides this month.</p>'}
@@ -653,6 +687,7 @@ const AdminDashboard = () => {
             { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
             { id: 'drivers', label: 'Live Drivers', icon: Truck },
             { id: 'rides', label: 'Rides Feed', icon: Activity },
+            { id: 'shared_dashboard', label: 'Shared Rides', icon: Users },
             { id: 'kyc', label: 'KYC Requests', icon: ShieldCheck },
             { id: 'payouts', label: 'Payouts', icon: IndianRupee },
             { id: 'referrals', label: 'Referrals', icon: Gift },
@@ -825,8 +860,8 @@ const AdminDashboard = () => {
                           {driver.isOnline ? 'Online' : 'Offline'}
                         </div>
                         <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400">
-                          <Battery size={10} className={driver.batteryLevel < 20 ? 'text-red-500' : 'text-emerald-500'} />
-                          {driver.batteryLevel}%
+                          <Battery size={10} className="text-slate-400" />
+                          {driver.isOnline ? 'Active' : 'Idle'}
                         </div>
                       </div>
                     </button>
@@ -1235,6 +1270,115 @@ const AdminDashboard = () => {
             </div>
           </div>
         )}
+        {activeView === 'shared_dashboard' && (() => {
+          const waitingRides = liveSharedRides.filter(r => r.status === 'waiting');
+          const activeRides = liveSharedRides.filter(r => r.status === 'accepted');
+          const waitingPassengers = liveSharedBookings.filter(b => b.status === 'searching');
+          const onboardPassengers = liveSharedBookings.filter(b => ['driver_assigned', 'booked', 'onboard'].includes(b.status));
+          return (
+            <div className="flex flex-col gap-6">
+              {/* Stats */}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {[
+                  { label: 'Waiting Rides', value: waitingRides.length, color: 'text-amber-400' },
+                  { label: 'Active Rides', value: activeRides.length, color: 'text-emerald-400' },
+                  { label: 'Waiting Passengers', value: waitingPassengers.length, color: 'text-blue-400' },
+                  { label: 'Onboard Passengers', value: onboardPassengers.length, color: 'text-violet-400' },
+                ].map(s => (
+                  <div key={s.label} className="bg-[#1e293b] rounded-2xl p-5 border border-slate-800">
+                    <p className={`text-3xl font-black ${s.color}`}>{s.value}</p>
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Active & Waiting Rides */}
+              <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+                <h3 className="font-black text-white uppercase tracking-widest text-sm mb-6">Live Shared Rides</h3>
+                {liveSharedRides.length === 0 ? (
+                  <p className="text-slate-500 text-sm font-bold text-center py-8">Abhi koi active shared ride nahi hai</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest border-b border-slate-800">
+                          <th className="pb-4 px-3">Route</th>
+                          <th className="pb-4 px-3">Driver</th>
+                          <th className="pb-4 px-3">Passengers</th>
+                          <th className="pb-4 px-3">Seats Left</th>
+                          <th className="pb-4 px-3">Status</th>
+                          <th className="pb-4 px-3 text-right">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {liveSharedRides.map(ride => (
+                          <tr key={ride.id} className="hover:bg-slate-800/50 transition-all">
+                            <td className="py-4 px-3">
+                              <p className="text-sm font-black text-white">{ride.routeName || '—'}</p>
+                              <p className="text-[10px] text-slate-500 font-mono">#{ride.id.slice(-6).toUpperCase()}</p>
+                            </td>
+                            <td className="py-4 px-3 text-sm font-bold text-slate-400">{ride.driverName || 'No Driver'}</td>
+                            <td className="py-4 px-3 text-sm font-black text-white">{ride.passengers?.length || 0}</td>
+                            <td className="py-4 px-3 text-sm font-black text-slate-400">{ride.availableSeats ?? '—'}</td>
+                            <td className="py-4 px-3">
+                              <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-lg ${ride.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                                {ride.status === 'accepted' ? 'Active' : 'Waiting'}
+                              </span>
+                            </td>
+                            <td className="py-4 px-3 text-right text-xs text-slate-500">{ride.createdAt?.toDate?.()?.toLocaleTimeString('en-IN') || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Waiting Passengers */}
+              <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+                <h3 className="font-black text-white uppercase tracking-widest text-sm mb-6">Passengers Searching / Onboard</h3>
+                {liveSharedBookings.length === 0 ? (
+                  <p className="text-slate-500 text-sm font-bold text-center py-8">Koi passenger abhi waiting mein nahi hai</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="text-slate-500 text-[10px] font-black uppercase tracking-widest border-b border-slate-800">
+                          <th className="pb-4 px-3">Passenger</th>
+                          <th className="pb-4 px-3">Route</th>
+                          <th className="pb-4 px-3">Boarding → Drop</th>
+                          <th className="pb-4 px-3">Seats</th>
+                          <th className="pb-4 px-3">Fare</th>
+                          <th className="pb-4 px-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {liveSharedBookings.map(b => (
+                          <tr key={b.id} className="hover:bg-slate-800/50 transition-all">
+                            <td className="py-4 px-3 text-sm font-black text-white">{b.passengerName || 'Guest'}</td>
+                            <td className="py-4 px-3 text-sm font-bold text-slate-400">{b.routeName || '—'}</td>
+                            <td className="py-4 px-3 text-xs font-bold text-slate-400">{b.boardingStop} → {b.dropStop}</td>
+                            <td className="py-4 px-3 text-sm font-black text-white">{b.seats || 1}</td>
+                            <td className="py-4 px-3 font-black text-white">₹{b.fare || 0}</td>
+                            <td className="py-4 px-3">
+                              <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-lg ${
+                                b.status === 'onboard' ? 'bg-emerald-500/10 text-emerald-400' :
+                                b.status === 'driver_assigned' || b.status === 'booked' ? 'bg-blue-500/10 text-blue-400' :
+                                'bg-amber-500/10 text-amber-400'
+                              }`}>
+                                {b.status === 'searching' ? 'Waiting' : b.status === 'driver_assigned' || b.status === 'booked' ? 'Driver Assigned' : 'Onboard'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         {activeView === 'kyc' && (
           <div className="flex flex-col gap-8">
             <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
@@ -1540,6 +1684,48 @@ const AdminDashboard = () => {
                     className="w-40 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-blue-600 transition-all" />
                 </label>
               </div>
+            </div>
+
+            {/* Cancellation Penalty */}
+            <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+              <h3 className="font-black text-white uppercase tracking-widest text-sm mb-6 flex items-center gap-3">
+                <AlertCircle size={18} className="text-red-400" /> Cancellation Penalty
+              </h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-5">Driver accept karne ke baad cancel kare toh penalty</p>
+              <div className="grid grid-cols-2 gap-6">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Free Cancellations Per Day</span>
+                  <input type="number" min="0" max="10" value={platformConfig.cancelPenaltyThreshold}
+                    onChange={e => setPlatformConfig(p => ({ ...p, cancelPenaltyThreshold: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-red-500 transition-all" />
+                  <span className="text-[10px] text-slate-500">Itni cancellations free hain, uske baad penalty lagegi</span>
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Penalty Amount (₹)</span>
+                  <input type="number" min="0" max="100" value={platformConfig.cancelPenaltyAmount}
+                    onChange={e => setPlatformConfig(p => ({ ...p, cancelPenaltyAmount: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-red-500 transition-all" />
+                  <span className="text-[10px] text-slate-500">Har extra cancellation pe itna wallet se katega</span>
+                </label>
+              </div>
+              <div className="bg-slate-900/60 rounded-xl px-4 py-3 text-[11px] text-red-400 font-bold mt-4">
+                {platformConfig.cancelPenaltyThreshold} free cancellations/day → uske baad ₹{platformConfig.cancelPenaltyAmount} per cancel
+              </div>
+            </div>
+
+            {/* Ride Accept Timer */}
+            <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+              <h3 className="font-black text-white uppercase tracking-widest text-sm mb-6 flex items-center gap-3">
+                <Activity size={18} className="text-amber-400" /> Ride Accept Timer
+              </h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-5">Driver ke paas kitne seconds hain ride accept karne ke liye</p>
+              <label className="flex flex-col gap-1.5 max-w-xs">
+                <span className="text-xs font-bold text-slate-400">Accept Timeout (seconds)</span>
+                <input type="number" min="10" max="120" value={platformConfig.rideAcceptTimeoutSecs}
+                  onChange={e => setPlatformConfig(p => ({ ...p, rideAcceptTimeoutSecs: Number(e.target.value) }))}
+                  className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                <span className="text-[10px] text-slate-500">Driver {platformConfig.rideAcceptTimeoutSecs} seconds mein accept nahi karta toh ride auto-reject ho jaayegi</span>
+              </label>
             </div>
 
             {/* App Status */}
@@ -1894,6 +2080,7 @@ const AdminDashboard = () => {
                   return d && d.getMonth() === reportMonth && d.getFullYear() === reportYear;
                 });
 
+                const previewCommissionRate = (platformConfig.commissionPercent || 8) / 100;
                 return (
                   <div className="flex flex-col gap-6">
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1902,8 +2089,8 @@ const AdminDashboard = () => {
                         { label: 'Completed', value: completed.length, color: 'text-emerald-400' },
                         { label: 'Cancelled', value: cancelled.length, color: 'text-orange-400' },
                         { label: 'Gross Revenue', value: `₹${revenue.toLocaleString('en-IN')}`, color: 'text-white' },
-                        { label: 'Platform (8%)', value: `₹${Math.round(revenue * 0.08).toLocaleString('en-IN')}`, color: 'text-emerald-400' },
-                        { label: 'Driver Payouts', value: `₹${Math.round(revenue * 0.92).toLocaleString('en-IN')}`, color: 'text-slate-300' },
+                        { label: `Platform (${platformConfig.commissionPercent || 8}%)`, value: `₹${Math.round(revenue * previewCommissionRate).toLocaleString('en-IN')}`, color: 'text-emerald-400' },
+                        { label: 'Driver Payouts', value: `₹${Math.round(revenue * (1 - previewCommissionRate)).toLocaleString('en-IN')}`, color: 'text-slate-300' },
                         { label: 'Active Drivers', value: new Set(completed.map(r => r.driverName).filter(Boolean)).size, color: 'text-blue-400' },
                         { label: 'Withdrawals', value: monthPayouts.length, color: 'text-orange-400' },
                       ].map(({ label, value, color }) => (
@@ -1924,7 +2111,7 @@ const AdminDashboard = () => {
                               <th className="pb-3 px-4">Driver</th>
                               <th className="pb-3 px-4">Rides</th>
                               <th className="pb-3 px-4">Gross</th>
-                              <th className="pb-3 px-4 text-right">Net (92.5%)</th>
+                              <th className="pb-3 px-4 text-right">Net ({(100 - (platformConfig.commissionPercent || 8))}%)</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800">
@@ -1943,7 +2130,7 @@ const AdminDashboard = () => {
                                   <td className="py-4 px-4 font-black text-white">{name}</td>
                                   <td className="py-4 px-4 text-slate-300 font-bold">{d.rides}</td>
                                   <td className="py-4 px-4 font-black text-white">₹{d.earnings.toLocaleString('en-IN')}</td>
-                                  <td className="py-4 px-4 text-right font-black text-emerald-400">₹{Math.round(d.earnings * 0.92).toLocaleString('en-IN')}</td>
+                                  <td className="py-4 px-4 text-right font-black text-emerald-400">₹{Math.round(d.earnings * (1 - previewCommissionRate)).toLocaleString('en-IN')}</td>
                                 </tr>
                               ))}
                           </tbody>
