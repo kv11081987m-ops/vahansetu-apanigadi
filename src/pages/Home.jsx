@@ -748,6 +748,9 @@ const Home = () => {
           where('availableSeats', '>', 0)
         )
       );
+      // Abort check 1: user cancelled during getDocs — no writes yet, safe to bail
+      if (sharedBookingAbortRef.current) { setSharedBookingStatus('selecting_stops'); return; }
+
       if (!ridesSnap.empty) {
         const existingRideRef = doc(db, 'shared_rides', ridesSnap.docs[0].id);
         // BUG 1 FIX: atomic transaction to prevent race condition
@@ -775,6 +778,17 @@ const Home = () => {
         rideId = newRide.id;
       }
       seatsReserved = true;
+      // Abort check 2: user cancelled during seat reservation — seats reserved, must restore
+      if (sharedBookingAbortRef.current) {
+        try {
+          await updateDoc(doc(db, 'shared_rides', rideId), {
+            availableSeats: increment(selectedSeats),
+            passengers: arrayRemove(user.uid)
+          });
+        } catch (e) { console.error('Abort seat restore error:', e); }
+        setSharedBookingStatus('selecting_stops');
+        return;
+      }
       // BUG 2 FIX: mark complete only after booking doc created
       const booking = await addDoc(collection(db, 'shared_bookings'), {
         passengerId: user.uid,
@@ -790,7 +804,7 @@ const Home = () => {
         createdAt: serverTimestamp()
       });
       seatsReserved = false;
-      // BUG 3 FIX: discard result if user already cancelled during async ops
+      // BUG 3 FIX: discard result if user cancelled during booking addDoc
       if (sharedBookingAbortRef.current) {
         try {
           await updateDoc(doc(db, 'shared_bookings', booking.id), { status: 'cancelled' });
@@ -799,6 +813,7 @@ const Home = () => {
             passengers: arrayRemove(user.uid)
           });
         } catch (e) { console.error('Abort cleanup error:', e); }
+        setSharedBookingStatus('selecting_stops');
         return;
       }
       setSharedBookingId(booking.id);
