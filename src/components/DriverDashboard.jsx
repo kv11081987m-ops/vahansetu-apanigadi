@@ -1460,6 +1460,7 @@ const DriverDashboard = () => {
           note: `Cash ride - Fare ₹${finalFare}, Platform Fee ₹${commission}`,
           createdAt: serverTimestamp(),
         });
+        txn.set(doc(db, 'config', 'stats'), { totalRevenue: increment(finalFare) }, { merge: true });
       });
       // Clear pending payment state after success
       localStorage.removeItem('pendingPaymentRideId');

@@ -32,7 +32,7 @@ import {
   Users,
   Share2
 } from 'lucide-react';
-import { collection, addDoc, updateDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, setDoc, doc, onSnapshot, query, where, getDocs, limit, getDoc, serverTimestamp, Timestamp, increment, runTransaction, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -687,25 +687,40 @@ const Home = () => {
     if (!sharedBookingId) return;
     if (sharedBookingStatus !== 'booked' && sharedBookingStatus !== 'onboard') return;
 
-    let unsubFn = null;
+    let unsubLocation = null;
     let cancelled = false;
-    const getSharedDriverLocation = async () => {
-      const bookingSnap = await getDoc(doc(db, 'shared_bookings', sharedBookingId));
-      if (cancelled || !bookingSnap.exists()) return;
-      const rideId = bookingSnap.data().rideId;
-      if (!rideId) return;
-      return onSnapshot(doc(db, 'shared_rides', rideId), (snap) => {
-        if (!snap.exists()) return;
-        const data = snap.data();
-        if (data.driverLocation) {
-          setSharedDriverLocation(data.driverLocation);
-          setSharedDriverHeading(data.driverHeading || 0);
-        }
-      });
+
+    const setup = async () => {
+      try {
+        const bookingSnap = await getDoc(doc(db, 'shared_bookings', sharedBookingId));
+        if (cancelled) return;
+        if (!bookingSnap.exists()) return;
+        const rideId = bookingSnap.data().rideId;
+        if (!rideId) return;
+        unsubLocation = onSnapshot(doc(db, 'shared_rides', rideId), (snap) => {
+          if (!snap.exists()) return;
+          const data = snap.data();
+          if (data.driverLocation) {
+            setSharedDriverLocation(data.driverLocation);
+            setSharedDriverHeading(data.driverHeading || 0);
+          }
+        });
+      } catch (e) {
+        console.error('Shared location setup error:', e);
+      }
     };
 
-    getSharedDriverLocation().then(u => { if (!cancelled) unsubFn = u; else u?.(); });
-    return () => { cancelled = true; unsubFn?.(); };
+    setup();
+
+    return () => {
+      cancelled = true;
+      if (unsubLocation) {
+        unsubLocation();
+        unsubLocation = null;
+      }
+      setSharedDriverLocation(null);
+      setSharedDriverHeading(0);
+    };
   }, [sharedBookingId, sharedBookingStatus]);
 
   const calculateSharedFare = (route, boardingStop, dropStop) => {
@@ -1209,6 +1224,9 @@ const Home = () => {
           });
         }
       } catch (e) { console.warn('[referral-fallback]', e); }
+
+      // Increment global revenue counter (setDoc with merge creates doc if absent)
+      setDoc(doc(db, 'config', 'stats'), { totalRevenue: increment(amount) }, { merge: true }).catch(() => {});
 
       clearTimeout(postPaymentTimerRef.current);
       postPaymentTimerRef.current = setTimeout(() => setActiveRide(null), 2000);

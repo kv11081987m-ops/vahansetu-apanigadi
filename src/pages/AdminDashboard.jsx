@@ -152,17 +152,17 @@ const AdminDashboard = () => {
     }).catch(console.error);
     const unsubUsers = () => {}; // no-op — count is one-shot, no listener to clean up
 
-    // 3. Rides & Revenue Listener (last 500 for display + revenue)
+    // 3. Rides Listener (last 500 for display only — revenue comes from config/stats counter)
     const unsubRides = onSnapshot(query(collection(db, 'ride_requests'), orderBy('createdAt', 'desc'), limit(500)), (snapshot) => {
       const rides = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRecentRides(rides);
-      let revenue = 0;
-      rides.forEach(ride => {
-        if (ride.status === 'paid' || ride.status === 'payment_done') {
-          revenue += (parseInt(ride.fareAmount) || parseInt(ride.fare) || 0);
-        }
-      });
-      setStats(prev => ({ ...prev, totalRevenue: revenue }));
+    });
+
+    // Revenue counter — atomically incremented on each completed payment (accurate for >500 rides)
+    const unsubRevenue = onSnapshot(doc(db, 'config', 'stats'), (snap) => {
+      if (snap.exists()) {
+        setStats(prev => ({ ...prev, totalRevenue: snap.data().totalRevenue || 0 }));
+      }
     });
 
     // Accurate total ride count (not capped at 500)
@@ -211,6 +211,7 @@ const AdminDashboard = () => {
       unsubDrivers();
       unsubUsers();
       unsubRides();
+      unsubRevenue();
       unsubPayouts();
       unsubConfig();
       unsubReferrals();
