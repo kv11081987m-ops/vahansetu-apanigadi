@@ -36,7 +36,10 @@ export const AuthProvider = ({ children }) => {
     sessionUnsubRef.current = onSnapshot(doc(db, 'users', uid), (snap) => {
       if (!snap.exists()) return;
       const newSid = snap.data().sessionId;
-      if (newSid && newSid !== currentSid) {
+      // Guard: if localStorage was already updated (e.g. by confirmSessionTakeover on this
+      // device), the old watcher must not sign us out — check localStorage before acting.
+      const storedSid = localStorage.getItem('vs_session_id');
+      if (newSid && newSid !== currentSid && newSid !== storedSid) {
         // Another device claimed the session — force logout this device
         localStorage.removeItem('vs_session_id');
         signOut(auth);

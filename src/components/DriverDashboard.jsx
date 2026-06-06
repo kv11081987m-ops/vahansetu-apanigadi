@@ -633,6 +633,7 @@ const DriverDashboard = () => {
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [upiId, setUpiId] = useState('');
+  const isWithdrawingRef = useRef(false);
   const [systemBroadcasts, setSystemBroadcasts] = useState([]);
   const { rides: rideHistory, loading: historyLoading, formatDate, statusMeta } = useRideHistory(
     activeTab === 'history' && driverId ? { driverId } : {}
@@ -653,6 +654,7 @@ const DriverDashboard = () => {
   const [hoveredPassengerRating, setHoveredPassengerRating] = useState(0);
   const pendingRatingRideRef = useRef(null); // { rideId, passengerId }
   const [acceptSecondsLeft, setAcceptSecondsLeft] = useState(null);
+  const broadcastTimeoutRef = useRef(null);
   const prevNewRequestIdRef = useRef(null);
   const profileLoadedRef = useRef(false);
   const mapRef = useRef(null);
@@ -710,6 +712,7 @@ const DriverDashboard = () => {
 
     const watchId = navigator.geolocation.watchPosition(
       async (pos) => {
+        try {
         const { latitude, longitude, speed, heading } = pos.coords;
         const now = Date.now();
         const elapsed = (now - lastPositionTime) / 1000;
@@ -763,6 +766,9 @@ const DriverDashboard = () => {
               console.error("Waiting flush error:", e);
             }
           }
+        }
+        } catch (e) {
+          console.error('[GPS] Firestore update error:', e);
         }
       },
       (err) => {
@@ -873,12 +879,15 @@ const DriverDashboard = () => {
         // Only show if it's recent (last 1 hour)
         if (data.timestamp?.toMillis() > Date.now() - 3600000) {
           setLatestBroadcast(data);
-          // Auto-clear after 15 seconds
-          setTimeout(() => setLatestBroadcast(null), 15000);
+          if (broadcastTimeoutRef.current) clearTimeout(broadcastTimeoutRef.current);
+          broadcastTimeoutRef.current = setTimeout(() => setLatestBroadcast(null), 15000);
         }
       }
     });
-    return () => unsub();
+    return () => {
+      unsub();
+      if (broadcastTimeoutRef.current) clearTimeout(broadcastTimeoutRef.current);
+    };
   }, []);
 
   // Fetch recent system broadcasts for messages tab
@@ -1158,14 +1167,15 @@ const DriverDashboard = () => {
         if (activeSharedRide?.id) {
           txn.update(doc(db, 'shared_rides', activeSharedRide.id), { availableSeats: increment(seats) });
         }
+        // Keep wallet_transactions inside transaction for atomicity — prevents missing audit trail
+        txn.set(doc(collection(db, 'wallet_transactions')), {
+          driverId, type: 'shared_ride_earning', amount: driverEarning,
+          fare, commission, status: 'completed',
+          note: `Shared ride - Fare ₹${fare}, Commission ₹${commission}`,
+          createdAt: serverTimestamp()
+        });
       });
     } catch { return; }
-    await addDoc(collection(db, 'wallet_transactions'), {
-      driverId, type: 'shared_ride_earning', amount: driverEarning,
-      fare, commission, status: 'completed',
-      note: `Shared ride - Fare ₹${fare}, Commission ₹${commission}`,
-      createdAt: serverTimestamp()
-    });
   };
 
   const handleCompleteSharedTrip = async () => {
@@ -1333,15 +1343,22 @@ const DriverDashboard = () => {
       setAcceptSecondsLeft(null);
       return;
     }
+    // Capture rideId at effect start — prevents rejecting a different ride if newRequest
+    // changes to a new broadcast before the countdown reaches zero (stale closure guard).
+    const capturedRideId = newRequest.id;
     const timeout = config.rideAcceptTimeoutSecs ?? 30;
     let remaining = timeout;
     setAcceptSecondsLeft(remaining);
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       remaining -= 1;
       setAcceptSecondsLeft(remaining);
       if (remaining <= 0) {
         clearInterval(interval);
-        handleRejectRide();
+        if (!driverId) return;
+        await updateDoc(doc(db, 'ride_requests', capturedRideId), {
+          [`rejectedBy.${driverId}`]: true
+        }).catch(() => {});
+        setNewRequest(null);
       }
     }, 1000);
     return () => clearInterval(interval);
@@ -1461,6 +1478,7 @@ const DriverDashboard = () => {
 
   const handleWithdrawRequest = async (e) => {
     e.preventDefault();
+    if (isWithdrawingRef.current) return;
     const amount = Number(withdrawAmount);
     if (!amount || amount < 50) {
       showToast('Minimum withdrawal amount ₹50 hai.', 'error');
@@ -1470,6 +1488,7 @@ const DriverDashboard = () => {
       showToast('Valid UPI ID darj karein.', 'error');
       return;
     }
+    isWithdrawingRef.current = true;
 
     try {
       const driverRef = doc(db, 'drivers', driverId);
@@ -1512,6 +1531,8 @@ const DriverDashboard = () => {
     } catch (err) {
       console.error(err);
       showToast('Error: ' + err.message, 'error');
+    } finally {
+      isWithdrawingRef.current = false;
     }
   };
 

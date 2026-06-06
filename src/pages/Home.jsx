@@ -224,9 +224,11 @@ const Home = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [sharedDriverLocation, setSharedDriverLocation] = useState(null);
   const [sharedDriverHeading, setSharedDriverHeading] = useState(0);
+  const toastTimeoutRef = useRef(null);
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
   // Route search filter
@@ -657,12 +659,13 @@ const Home = () => {
   // ── Shared Ride ───────────────────────────────────────────────────────────
 
   useEffect(() => {
+    if (rideMode !== 'shared') return;
     const unsubRoutes = onSnapshot(
       query(collection(db, 'shared_routes'), where('isActive', '==', true)),
       (snap) => setSharedRoutes(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
     return () => unsubRoutes();
-  }, []);
+  }, [rideMode]);
 
   useEffect(() => {
     if (!sharedBookingId) return;
@@ -935,9 +938,10 @@ const Home = () => {
 
     setSearchRadiusMsg(null);
 
-    // Clean up any previous listener before creating a new one (retry path safety)
+    // Clean up any previous listener and cancel timeout before creating a new one (retry path safety)
     activeRequestUnsubRef.current?.();
     activeRequestUnsubRef.current = null;
+    if (cancelTimeoutRef.current) { clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null; }
 
     const requestRef = await addDoc(collection(db, 'ride_requests'), {
       bookingId,
@@ -996,6 +1000,9 @@ const Home = () => {
           setBookingStatus('started');
         }
       } else if (status === 'completed') {
+        // Unsubscribe primary listener — backup listener (useEffect below) handles payment_done
+        unsub();
+        activeRequestUnsubRef.current = null;
         setBookingStatus('completed');
       } else if (status === 'paid' || status === 'payment_done') {
         clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null;
@@ -1072,6 +1079,8 @@ const Home = () => {
   useEffect(() => {
     if (!user) return;
     const broadcast = async () => {
+      // Only broadcast from the visible tab — prevents duplicate writes when multiple tabs are open
+      if (document.hidden) return;
       try {
         const now = Date.now();
         const snap = await getDocs(
@@ -1132,7 +1141,9 @@ const Home = () => {
     setBookingStatus('payment_done');
 
     try {
-      const amount = calculateFare();
+      // Use the fare stored in Firestore (authoritative) — prevents ₹0 payment if
+      // Google Maps route failed to load after a page reload before payment.
+      const amount = activeRide?.fareAmount || calculateFare();
       await updateDoc(doc(db, 'ride_requests', requestId), {
         status: 'payment_done',
         paymentStatus: 'completed',
@@ -1272,7 +1283,7 @@ const Home = () => {
           userId: user.uid,
           rideId: requestId,
           rating,
-          timestamp: new Date()
+          timestamp: serverTimestamp()
         });
         tx.update(rideRef, { status: 'finished', userRating: rating });
       });
@@ -1345,13 +1356,18 @@ const Home = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((position) => {
         const pos = { lat: position.coords.latitude, lng: position.coords.longitude };
-        setPickup(pos); map?.panTo(pos); map?.setZoom(15);
+        // Set a placeholder address first so the booking button remains enabled while geocoding
+        const placeholder = 'Current Location';
+        setPickup({ ...pos, address: placeholder });
+        setPickupInput(placeholder);
+        map?.panTo(pos); map?.setZoom(15);
         if (window.google) {
           const geocoder = new window.google.maps.Geocoder();
           geocoder.geocode({ location: pos }, (results, status) => {
             if (status === "OK" && results[0]) {
-              setPickupInput(results[0].formatted_address);
-              setPickup({ ...pos, address: results[0].formatted_address });
+              const address = results[0].formatted_address;
+              setPickupInput(address);
+              setPickup({ ...pos, address });
             }
           });
         }

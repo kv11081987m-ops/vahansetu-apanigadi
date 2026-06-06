@@ -98,6 +98,7 @@ const AdminDashboard = () => {
   const [editingRoute, setEditingRoute] = useState(null);
   const [newRoute, setNewRoute] = useState({ name: '', stops: ['', ''], fares: [10], isActive: true });
   const [driverPrivateData, setDriverPrivateData] = useState({}); // driverId → { adminTempAccess }
+  const [showNuclearConfirm, setShowNuclearConfirm] = useState(false);
   const [referrals, setReferrals] = useState([]);
   const [liveSharedRides, setLiveSharedRides] = useState([]);
   const [liveSharedBookings, setLiveSharedBookings] = useState([]);
@@ -114,17 +115,23 @@ const AdminDashboard = () => {
   });
 
   useEffect(() => {
+    // Track which driver IDs have already had private data fetched — prevents re-fetching on
+    // every GPS location update (drivers update Firestore every 3-10s when online).
+    const fetchedPrivateIds = new Set();
+
     // 1. Stats & Drivers Listener
     const unsubDrivers = onSnapshot(collection(db, 'drivers'), (snapshot) => {
       const driversData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setDrivers(driversData);
       setStats(prev => ({ ...prev, totalDrivers: driversData.length }));
 
-      // Fetch adminTempAccess from private subcollection for restricted drivers
+      // Only fetch private data for restricted drivers we haven't fetched yet
       const restrictedIds = driversData.filter(d => (d.walletBalance || 0) < -50).map(d => d.id);
-      if (restrictedIds.length > 0) {
+      const unfetchedIds = restrictedIds.filter(id => !fetchedPrivateIds.has(id));
+      if (unfetchedIds.length > 0) {
+        unfetchedIds.forEach(id => fetchedPrivateIds.add(id));
         Promise.all(
-          restrictedIds.map(id =>
+          unfetchedIds.map(id =>
             getDoc(doc(db, 'drivers', id, 'private', 'data'))
               .then(snap => ({ id, adminTempAccess: snap.exists() ? (snap.data().adminTempAccess ?? false) : false }))
               .catch(() => ({ id, adminTempAccess: false }))
@@ -392,7 +399,12 @@ const AdminDashboard = () => {
   };
 
   const handleNuclearCleanup = async () => {
-    if (!window.confirm("DANGEROUS: This will cancel ALL active/pending rides across the entire system. Proceed?")) return;
+    if (!showNuclearConfirm) {
+      setShowNuclearConfirm(true);
+      setTimeout(() => setShowNuclearConfirm(false), 10000);
+      return;
+    }
+    setShowNuclearConfirm(false);
     try {
       const activeStatuses = ['pending', 'accepted', 'started', 'completed', 'payment_done'];
       let totalCleared = 0;
@@ -630,17 +642,25 @@ const AdminDashboard = () => {
   const handleAddDriver = async (e) => {
     e.preventDefault();
     if (!genName || !genPhone) { showToast("Please enter name and phone", 'error'); return; }
-    
+    const phone = genPhone.startsWith('+91') ? genPhone : `+91${genPhone}`;
     try {
+      const displayId = 'VS-' + Math.random().toString(36).substr(2, 6).toUpperCase();
+      // Create drivers doc (placeholder — id will be auto-generated, not driver's auth uid)
       await addDoc(collection(db, 'drivers'), {
         name: genName,
-        phone: genPhone.startsWith('+91') ? genPhone : `+91${genPhone}`,
+        phone,
+        displayId,
         isOnline: false,
         vehicleType: 'battery_rickshaw',
         rating: 5.0,
+        verificationStatus: 'unverified',
+        walletBalance: 0,
         createdAt: serverTimestamp()
       });
-      showToast("Driver Registered Successfully!");
+      // Note: this path does NOT create a users/{uid} doc because we don't have the uid yet.
+      // The driver MUST register via OTP login in the app to complete their profile.
+      // AuthContext.registerUser() will create the users doc and link it to their auth uid.
+      showToast(`Driver added! Driver must register via OTP login in app to activate.`);
       setGenName('');
       setGenPhone('');
     } catch (err) {
@@ -902,11 +922,11 @@ const AdminDashboard = () => {
                   <h3 className="font-black text-white uppercase tracking-widest text-sm">Recent Activity Feed</h3>
                   <p className="text-xs text-slate-500 font-bold mt-1">Total {recentRides.length} sessions tracked</p>
                 </div>
-                <button 
+                <button
                   onClick={handleNuclearCleanup}
-                  className="px-6 py-3 bg-red-600/10 text-red-500 rounded-2xl border border-red-500/20 text-[10px] font-black uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all flex items-center gap-2"
+                  className={`px-6 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${showNuclearConfirm ? 'bg-red-600 text-white border-red-600 animate-pulse' : 'bg-red-600/10 text-red-500 border-red-500/20 hover:bg-red-600 hover:text-white'}`}
                 >
-                  <AlertCircle size={14} /> NUCLEAR CLEANUP
+                  <AlertCircle size={14} /> {showNuclearConfirm ? 'CONFIRM? TAP AGAIN' : 'NUCLEAR CLEANUP'}
                 </button>
               </div>
               <div className="overflow-x-auto">
@@ -1210,11 +1230,11 @@ const AdminDashboard = () => {
                   <h3 className="font-black text-white uppercase tracking-widest text-sm">System Ride Feed</h3>
                   <p className="text-xs text-slate-500 font-bold mt-1">Live monitoring and cleanup center</p>
                 </div>
-                <button 
+                <button
                   onClick={handleNuclearCleanup}
-                  className="px-6 py-3 bg-red-600/10 text-red-500 rounded-2xl border border-red-500/20 text-[10px] font-black uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all flex items-center gap-2"
+                  className={`px-6 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${showNuclearConfirm ? 'bg-red-600 text-white border-red-600 animate-pulse' : 'bg-red-600/10 text-red-500 border-red-500/20 hover:bg-red-600 hover:text-white'}`}
                 >
-                  <AlertCircle size={14} /> NUCLEAR CLEANUP
+                  <AlertCircle size={14} /> {showNuclearConfirm ? 'CONFIRM? TAP AGAIN' : 'NUCLEAR CLEANUP'}
                 </button>
               </div>
               <div className="overflow-x-auto">
@@ -2020,8 +2040,8 @@ const AdminDashboard = () => {
                     <p className="text-xs text-slate-500 font-bold mt-0.5">Saare active/pending rides ek saath cancel karo</p>
                   </div>
                   <button onClick={handleNuclearCleanup}
-                    className="px-6 py-3 bg-red-600/10 text-red-500 rounded-xl border border-red-500/20 text-[10px] font-black uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all flex items-center gap-2 shrink-0">
-                    <AlertCircle size={14} /> Run Cleanup
+                    className={`px-6 py-3 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 shrink-0 ${showNuclearConfirm ? 'bg-red-600 text-white border-red-600 animate-pulse' : 'bg-red-600/10 text-red-500 border-red-500/20 hover:bg-red-600 hover:text-white'}`}>
+                    <AlertCircle size={14} /> {showNuclearConfirm ? 'CONFIRM?' : 'Run Cleanup'}
                   </button>
                 </div>
               </div>

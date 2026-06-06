@@ -79,13 +79,15 @@ export const RideProvider = ({ children }) => {
         where('driverId', '==', 'broadcast'),
         limit(50)
       );
-      // includeMetadataChanges: true lets us detect and skip stale offline-cache snapshots.
-      // Without this, Firestore fires first with cached data (showing old cancelled rides as
-      // still-pending), then fires again with server data (correcting to 0 pending). This
-      // causes the brief "pending: 1 → 0" false positive that stops the driver card from showing.
+      // includeMetadataChanges: true lets us detect stale offline-cache snapshots.
+      // We no longer skip cache entirely — on slow networks, pending rides in cache are
+      // better than no ride at all. We still skip cache-only snapshots that have hasPendingWrites
+      // (i.e. locally queued writes that haven't been confirmed). Ghost rides are guarded by
+      // the twoHoursAgo time filter below.
       const unsub2 = onSnapshot(q2, { includeMetadataChanges: true }, (snapshot) => {
         setLoading(false);
-        if (snapshot.metadata.fromCache) return; // skip stale cache — only trust server data
+        // Skip if snapshot only contains local pending writes not yet sent to server
+        if (snapshot.metadata.fromCache && snapshot.metadata.hasPendingWrites) return;
 
         const allDocs = snapshot.docs.map(d => ({
           id: d.id,

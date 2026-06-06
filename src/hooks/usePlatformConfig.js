@@ -32,6 +32,9 @@ export function usePlatformConfig() {
         setConfig({ ...PLATFORM_DEFAULTS, ...snap.data() });
       }
       setLoading(false);
+    }, (err) => {
+      console.error('[usePlatformConfig] config read failed:', err);
+      setLoading(false);
     });
     return () => unsub();
   }, []);
