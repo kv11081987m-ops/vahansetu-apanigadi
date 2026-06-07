@@ -661,10 +661,13 @@ const DriverDashboard = () => {
   const prevPassengerCountRef = useRef(0);
   const activeSharedRideRef = useRef(null);
 
+  const toastTimeoutRef = useRef(null);
   const showToast = useCallback((message, type = 'info') => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 3500);
   }, []);
+  useEffect(() => () => { if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current); }, []);
 
 
   const prevNewRequestStatusRef = useRef(null);
@@ -1122,6 +1125,10 @@ const DriverDashboard = () => {
   const handleAcceptSharedRide = async (ride) => {
     const vehicleNo = profile?.vehicleNumber || profile?.rcNumber || '';
     try {
+      // Pre-fetch booking IDs — getDocs is not allowed inside runTransaction
+      const bookingsSnap = await getDocs(
+        query(collection(db, 'shared_bookings'), where('rideId', '==', ride.id), where('status', 'in', ['searching', 'booked']))
+      );
       await runTransaction(db, async (txn) => {
         const rideRef = doc(db, 'shared_rides', ride.id);
         const snap = await txn.get(rideRef);
@@ -1130,17 +1137,15 @@ const DriverDashboard = () => {
           driverId, driverName: profile?.name || 'Partner',
           status: 'accepted', acceptedAt: new Date().toISOString(), vehicleNumber: vehicleNo
         });
+        // Include booking updates atomically — prevents partial write if network fails mid-way
+        bookingsSnap.docs.forEach(b => {
+          txn.update(doc(db, 'shared_bookings', b.id), { status: 'driver_assigned', driverId, vehicleNumber: vehicleNo });
+        });
       });
     } catch (e) {
       if (e.message === 'already_taken') { showToast('Ye ride kisi aur driver ne le li.', 'error'); return; }
       throw e;
     }
-    const bookingsSnap = await getDocs(
-      query(collection(db, 'shared_bookings'), where('rideId', '==', ride.id), where('status', 'in', ['searching', 'booked']))
-    );
-    await Promise.all(bookingsSnap.docs.map(b =>
-      updateDoc(doc(db, 'shared_bookings', b.id), { status: 'driver_assigned', driverId, vehicleNumber: vehicleNo })
-    ));
     if (ride.routeId) {
       const routeDoc = await getDoc(doc(db, 'shared_routes', ride.routeId));
       if (routeDoc.exists()) setRouteStops(routeDoc.data().stops || []);
