@@ -1131,9 +1131,19 @@ const Home = () => {
 
   const handleCancelScheduled = async (rideId) => {
     try {
-      await updateDoc(doc(db, 'ride_requests', rideId), { status: 'cancelled' });
+      await runTransaction(db, async (txn) => {
+        const ref = doc(db, 'ride_requests', rideId);
+        const snap = await txn.get(ref);
+        if (!snap.exists() || snap.data().status !== 'scheduled') throw new Error('not_scheduled');
+        txn.update(ref, { status: 'cancelled' });
+      });
       setScheduledRides(prev => prev.filter(r => r.id !== rideId));
     } catch (err) {
+      if (err.message === 'not_scheduled') {
+        showToast('Ride already active hai, cancel nahi ho sakta.', 'error');
+        setScheduledRides(prev => prev.filter(r => r.id !== rideId));
+        return;
+      }
       console.error('Cancel scheduled ride error:', err);
       showToast('Cancel nahi ho saka. Dobara try karein.', 'error');
     }
