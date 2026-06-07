@@ -866,7 +866,10 @@ const DriverDashboard = () => {
     );
     const unsub = onSnapshot(txQuery, (snap) => {
       setWalletTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (err) => console.error("Error fetching transactions:", err));
+    }, (err) => {
+      console.error("Error fetching transactions:", err);
+      showToast('Wallet history load nahi hui. Refresh karein.', 'error');
+    });
     return () => unsub();
   }, [driverId]);
 
@@ -1164,8 +1167,9 @@ const DriverDashboard = () => {
           walletBalance: increment(-commission),
           totalEarnings: increment(fare)
         });
-        if (activeSharedRide?.id) {
-          txn.update(doc(db, 'shared_rides', activeSharedRide.id), { availableSeats: increment(seats) });
+        const sharedRideId = activeSharedRideRef.current?.id;
+        if (sharedRideId) {
+          txn.update(doc(db, 'shared_rides', sharedRideId), { availableSeats: increment(seats) });
         }
         // Keep wallet_transactions inside transaction for atomicity — prevents missing audit trail
         txn.set(doc(collection(db, 'wallet_transactions')), {
@@ -1213,6 +1217,8 @@ const DriverDashboard = () => {
         const rideIdForAutoDrop = activeSharedRide.id;
         const docsForAutoDrop = autoDropSnap.docs.map(d => ({ id: d.id, fare: d.data().fare, seats: d.data().seats || 1 }));
         setTimeout(async () => {
+          // Guard: if ride changed or ended, skip — stale rideId would update wrong ride
+          if (activeSharedRideRef.current?.id !== rideIdForAutoDrop) return;
           for (const bookingDoc of docsForAutoDrop) {
             try {
               const fresh = await getDoc(doc(db, 'shared_bookings', bookingDoc.id));
@@ -1243,7 +1249,8 @@ const DriverDashboard = () => {
     if (preReleaseTimer) clearTimeout(preReleaseTimer);
     const rideIdForTimer = activeSharedRide.id;
     const timer = setTimeout(async () => {
-      if (!rideIdForTimer) return;
+      // Guard: if ride changed or ended, stale timer should not release seats on wrong ride
+      if (activeSharedRideRef.current?.id !== rideIdForTimer) return;
       try {
         const freshSnap = await getDocs(
           query(
