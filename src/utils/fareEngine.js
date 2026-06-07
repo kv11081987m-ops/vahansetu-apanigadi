@@ -10,15 +10,29 @@ export const FARE_DEFAULTS = {
   nightStartHour: 22,
   nightEndHour: 5,
   minFare: 20,
+  surgeEnabled: false,
+  surgeMultiplier: 1.5,
+  surgePeakStart1: 8,
+  surgePeakEnd1: 10,
+  surgePeakStart2: 17,
+  surgePeakEnd2: 20,
 };
 
 function isNightTime(rideTime, nightStartHour, nightEndHour) {
   const hour = rideTime.getHours();
-  // Night window crosses midnight: 22 → 5
   if (nightStartHour > nightEndHour) {
     return hour >= nightStartHour || hour < nightEndHour;
   }
   return hour >= nightStartHour && hour < nightEndHour;
+}
+
+function isSurgeTime(hour, cfg) {
+  if (!cfg.surgeEnabled) return false;
+  const in1 = cfg.surgePeakStart1 != null && cfg.surgePeakEnd1 != null
+    && hour >= cfg.surgePeakStart1 && hour < cfg.surgePeakEnd1;
+  const in2 = cfg.surgePeakStart2 != null && cfg.surgePeakEnd2 != null
+    && hour >= cfg.surgePeakStart2 && hour < cfg.surgePeakEnd2;
+  return in1 || in2;
 }
 
 /**
@@ -27,7 +41,7 @@ function isNightTime(rideTime, nightStartHour, nightEndHour) {
  * @param {'savaari'|'logistics'} serviceType
  * @param {object} config - keys from FARE_DEFAULTS
  * @param {Date} [rideTime] - defaults to now
- * @returns {{ base, distance, waiting, subtotal, nightSurcharge, total, isNight, breakdown }}
+ * @returns {{ base, distance, waiting, subtotal, nightSurcharge, surgeCharge, total, isNight, isSurge, breakdown }}
  */
 export function computeFare(distanceKm, waitingSeconds = 0, serviceType = 'savaari', config = {}, rideTime = new Date()) {
   const cfg = { ...FARE_DEFAULTS, ...config };
@@ -36,18 +50,22 @@ export function computeFare(distanceKm, waitingSeconds = 0, serviceType = 'savaa
   const includedKm  = serviceType === 'logistics' ? cfg.logisticsIncludedKm : cfg.savaariIncludedKm;
   const perKm       = serviceType === 'logistics' ? cfg.logisticsPerKm      : cfg.savaariPerKm;
 
-  const extraKm      = Math.max(0, distanceKm - includedKm);
+  const extraKm        = Math.max(0, distanceKm - includedKm);
   const distanceCharge = Math.round(extraKm * perKm);
 
-  const waitingMins  = Math.floor(waitingSeconds / 60);
+  const waitingMins   = Math.floor(waitingSeconds / 60);
   const waitingCharge = Math.round(waitingMins * cfg.waitingRatePerMin);
 
   const subtotal = baseFare + distanceCharge + waitingCharge;
 
-  const night = isNightTime(rideTime, cfg.nightStartHour, cfg.nightEndHour);
+  const night        = isNightTime(rideTime, cfg.nightStartHour, cfg.nightEndHour);
   const nightSurcharge = night ? Math.round(subtotal * (cfg.nightMultiplier - 1)) : 0;
 
-  const total = Math.max(cfg.minFare, subtotal + nightSurcharge);
+  const hour        = rideTime.getHours();
+  const surge       = isSurgeTime(hour, cfg);
+  const surgeCharge = surge ? Math.round(subtotal * ((cfg.surgeMultiplier || 1.5) - 1)) : 0;
+
+  const total = Math.max(cfg.minFare, subtotal + nightSurcharge + surgeCharge);
 
   return {
     base: baseFare,
@@ -57,7 +75,10 @@ export function computeFare(distanceKm, waitingSeconds = 0, serviceType = 'savaa
     subtotal,
     isNight: night,
     nightSurcharge,
+    isSurge: surge,
+    surgeCharge,
+    surgeMultiplier: surge ? (cfg.surgeMultiplier || 1.5) : 1,
     total,
-    breakdown: `Base ₹${baseFare} + Distance ₹${distanceCharge}${waitingCharge ? ` + Waiting ₹${waitingCharge}` : ''}${night ? ` + Night ₹${nightSurcharge}` : ''}`,
+    breakdown: `Base ₹${baseFare} + Distance ₹${distanceCharge}${waitingCharge ? ` + Waiting ₹${waitingCharge}` : ''}${night ? ` + Night ₹${nightSurcharge}` : ''}${surge ? ` + Surge ₹${surgeCharge}` : ''}`,
   };
 }

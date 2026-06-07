@@ -25,7 +25,10 @@ import {
   Lock,
   Plus,
   Minus,
-  Gift
+  Gift,
+  Zap,
+  Tag,
+  Megaphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
@@ -89,7 +92,18 @@ const AdminDashboard = () => {
     cancelPenaltyThreshold: 3,
     cancelPenaltyAmount: 10,
     rideAcceptTimeoutSecs: 30,
+    surgeEnabled: false,
+    surgeMultiplier: 1.5,
+    surgePeakStart1: 8,
+    surgePeakEnd1: 10,
+    surgePeakStart2: 17,
+    surgePeakEnd2: 20,
+    bannerEnabled: false,
+    bannerText: '',
+    bannerColor: 'orange',
   });
+  const [promoCodes, setPromoCodes] = useState([]);
+  const [newPromo, setNewPromo] = useState({ code: '', discountType: 'flat', discountValue: 50, maxDiscount: 100, minFare: 0, maxUses: 100 });
   const [configSaving, setConfigSaving] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
   const [sharedRoutes, setSharedRoutes] = useState([]);
@@ -207,6 +221,12 @@ const AdminDashboard = () => {
       (snap) => setLiveSharedBookings(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
 
+    // 10. Promo Codes Listener
+    const unsubPromos = onSnapshot(
+      query(collection(db, 'promo_codes'), orderBy('createdAt', 'desc')),
+      (snap) => setPromoCodes(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+
     return () => {
       unsubDrivers();
       unsubUsers();
@@ -218,6 +238,7 @@ const AdminDashboard = () => {
       unsubSharedRoutes();
       unsubLiveShared();
       unsubLiveBookings();
+      unsubPromos();
     };
   }, []);
 
@@ -232,6 +253,37 @@ const AdminDashboard = () => {
     } finally {
       setConfigSaving(false);
     }
+  };
+
+  const handleCreatePromo = async () => {
+    const code = newPromo.code.trim().toUpperCase();
+    if (!code || !newPromo.discountValue) { showToast('Code aur discount value zaroori hai.', 'error'); return; }
+    try {
+      await addDoc(collection(db, 'promo_codes'), {
+        code,
+        discountType: newPromo.discountType,
+        discountValue: Number(newPromo.discountValue),
+        maxDiscount: newPromo.discountType === 'percent' ? Number(newPromo.maxDiscount) : null,
+        minFare: Number(newPromo.minFare) || 0,
+        maxUses: Number(newPromo.maxUses) || 0,
+        usedCount: 0,
+        isActive: true,
+        expiresAt: null,
+        createdAt: serverTimestamp(),
+      });
+      setNewPromo({ code: '', discountType: 'flat', discountValue: 50, maxDiscount: 100, minFare: 0, maxUses: 100 });
+      showToast('Promo code create ho gaya!');
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  };
+
+  const handleTogglePromo = async (id, current) => {
+    await updateDoc(doc(db, 'promo_codes', id), { isActive: !current });
+  };
+
+  const handleDeletePromo = async (id) => {
+    if (!showNuclearConfirm) { setShowNuclearConfirm('promo_' + id); return; }
+    await deleteDoc(doc(db, 'promo_codes', id));
+    setShowNuclearConfirm(null);
   };
 
   const handleAddRoute = async () => {
@@ -2021,6 +2073,166 @@ const AdminDashboard = () => {
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Promo Banner Settings */}
+            <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+              <h3 className="font-black text-white uppercase tracking-widest text-sm mb-6 flex items-center gap-3">
+                <Megaphone size={18} className="text-orange-400" /> Promo Banner
+              </h3>
+              <div className="flex items-center justify-between mb-5">
+                <span className="text-sm font-bold text-slate-300">Banner Enable</span>
+                <button onClick={() => setPlatformConfig(p => ({ ...p, bannerEnabled: !p.bannerEnabled }))}
+                  className={`w-12 h-6 rounded-full transition-all relative ${platformConfig.bannerEnabled ? 'bg-orange-500' : 'bg-slate-700'}`}>
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${platformConfig.bannerEnabled ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+              <label className="flex flex-col gap-1.5 mb-4">
+                <span className="text-xs font-bold text-slate-400">Banner Text</span>
+                <input type="text" value={platformConfig.bannerText} maxLength={120}
+                  onChange={e => setPlatformConfig(p => ({ ...p, bannerText: e.target.value }))}
+                  placeholder="e.g. 🎉 First ride 50% off! Code: WELCOME50"
+                  className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-orange-500 transition-all" />
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {['orange', 'blue', 'green', 'red', 'purple'].map(c => (
+                  <button key={c} onClick={() => setPlatformConfig(p => ({ ...p, bannerColor: c }))}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 transition-all ${platformConfig.bannerColor === c ? 'border-white' : 'border-transparent'} ${
+                      c === 'orange' ? 'bg-orange-500 text-white' : c === 'blue' ? 'bg-blue-600 text-white' :
+                      c === 'green' ? 'bg-emerald-600 text-white' : c === 'red' ? 'bg-red-600 text-white' : 'bg-violet-600 text-white'
+                    }`}>{c}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* Surge Pricing Settings */}
+            <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+              <h3 className="font-black text-white uppercase tracking-widest text-sm mb-6 flex items-center gap-3">
+                <Zap size={18} className="text-amber-400" /> Surge Pricing
+              </h3>
+              <div className="flex items-center justify-between mb-5">
+                <span className="text-sm font-bold text-slate-300">Surge Enable</span>
+                <button onClick={() => setPlatformConfig(p => ({ ...p, surgeEnabled: !p.surgeEnabled }))}
+                  className={`w-12 h-6 rounded-full transition-all relative ${platformConfig.surgeEnabled ? 'bg-amber-500' : 'bg-slate-700'}`}>
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-all ${platformConfig.surgeEnabled ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Surge Multiplier (e.g. 1.5)</span>
+                  <input type="number" min="1.1" max="3" step="0.1" value={platformConfig.surgeMultiplier}
+                    onChange={e => setPlatformConfig(p => ({ ...p, surgeMultiplier: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                </label>
+              </div>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Morning Peak</p>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Start Hour (0-23)</span>
+                  <input type="number" min="0" max="23" value={platformConfig.surgePeakStart1}
+                    onChange={e => setPlatformConfig(p => ({ ...p, surgePeakStart1: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">End Hour (0-23)</span>
+                  <input type="number" min="0" max="23" value={platformConfig.surgePeakEnd1}
+                    onChange={e => setPlatformConfig(p => ({ ...p, surgePeakEnd1: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                </label>
+              </div>
+              <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-3">Evening Peak</p>
+              <div className="grid grid-cols-2 gap-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">Start Hour (0-23)</span>
+                  <input type="number" min="0" max="23" value={platformConfig.surgePeakStart2}
+                    onChange={e => setPlatformConfig(p => ({ ...p, surgePeakStart2: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-bold text-slate-400">End Hour (0-23)</span>
+                  <input type="number" min="0" max="23" value={platformConfig.surgePeakEnd2}
+                    onChange={e => setPlatformConfig(p => ({ ...p, surgePeakEnd2: Number(e.target.value) }))}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-amber-500 transition-all" />
+                </label>
+              </div>
+            </div>
+
+            {/* Promo Codes Management */}
+            <div className="bg-[#1e293b] rounded-[2rem] p-8 border border-slate-800">
+              <h3 className="font-black text-white uppercase tracking-widest text-sm mb-6 flex items-center gap-3">
+                <Tag size={18} className="text-emerald-400" /> Promo Codes
+              </h3>
+              {/* Create new promo */}
+              <div className="bg-slate-900/60 rounded-2xl p-5 border border-slate-700 mb-6">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Create New Code</p>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold text-slate-400">Code</span>
+                    <input type="text" value={newPromo.code} onChange={e => setNewPromo(p => ({ ...p, code: e.target.value.toUpperCase() }))}
+                      placeholder="WELCOME50" className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-black text-sm outline-none focus:border-emerald-500 uppercase" />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold text-slate-400">Type</span>
+                    <select value={newPromo.discountType} onChange={e => setNewPromo(p => ({ ...p, discountType: e.target.value }))}
+                      className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500">
+                      <option value="flat">Flat (₹)</option>
+                      <option value="percent">Percent (%)</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold text-slate-400">Value</span>
+                    <input type="number" min="1" value={newPromo.discountValue} onChange={e => setNewPromo(p => ({ ...p, discountValue: e.target.value }))}
+                      className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500" />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold text-slate-400">Max Uses (0=∞)</span>
+                    <input type="number" min="0" value={newPromo.maxUses} onChange={e => setNewPromo(p => ({ ...p, maxUses: e.target.value }))}
+                      className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500" />
+                  </label>
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold text-slate-400">Min Fare (₹)</span>
+                    <input type="number" min="0" value={newPromo.minFare} onChange={e => setNewPromo(p => ({ ...p, minFare: e.target.value }))}
+                      className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500" />
+                  </label>
+                  {newPromo.discountType === 'percent' && (
+                    <label className="flex flex-col gap-1">
+                      <span className="text-[10px] font-bold text-slate-400">Max Discount (₹)</span>
+                      <input type="number" min="1" value={newPromo.maxDiscount} onChange={e => setNewPromo(p => ({ ...p, maxDiscount: e.target.value }))}
+                        className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white font-bold outline-none focus:border-emerald-500" />
+                    </label>
+                  )}
+                </div>
+                <button onClick={handleCreatePromo} className="w-full py-3 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-500 transition-all">
+                  + Create Promo Code
+                </button>
+              </div>
+              {/* Existing codes list */}
+              <div className="space-y-3">
+                {promoCodes.length === 0 ? (
+                  <p className="text-center text-slate-500 text-sm py-4">Koi promo code nahi hai abhi.</p>
+                ) : promoCodes.map(p => (
+                  <div key={p.id} className={`flex items-center justify-between p-4 rounded-2xl border ${p.isActive ? 'border-emerald-500/30 bg-emerald-900/10' : 'border-slate-700 bg-slate-900/40 opacity-60'}`}>
+                    <div>
+                      <p className="text-sm font-black text-white">{p.code}</p>
+                      <p className="text-[10px] font-bold text-slate-400">
+                        {p.discountType === 'flat' ? `₹${p.discountValue} off` : `${p.discountValue}% off`}
+                        {p.minFare ? ` · Min ₹${p.minFare}` : ''}
+                        {p.maxUses > 0 ? ` · ${p.usedCount}/${p.maxUses} used` : ` · ${p.usedCount} used`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleTogglePromo(p.id, p.isActive)}
+                        className={`px-3 py-1.5 rounded-lg font-black text-[9px] uppercase transition-all ${p.isActive ? 'bg-emerald-600/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                        {p.isActive ? 'Active' : 'Off'}
+                      </button>
+                      <button onClick={() => handleDeletePromo(p.id)}
+                        className="p-1.5 rounded-lg bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white transition-all">
+                        <X size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Save Button */}

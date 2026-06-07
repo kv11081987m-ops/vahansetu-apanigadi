@@ -20,6 +20,9 @@ const PLATFORM_DEFAULTS = {
   cancelPenaltyThreshold: 3,   // kitni free cancellations per day
   cancelPenaltyAmount: 10,     // penalty per cancel uske baad (₹)
   rideAcceptTimeoutSecs: 30,   // driver ke paas kitne seconds hain ride accept karne ke liye
+  bannerEnabled: false,
+  bannerText: '',
+  bannerColor: 'orange',
 };
 
 export function usePlatformConfig() {

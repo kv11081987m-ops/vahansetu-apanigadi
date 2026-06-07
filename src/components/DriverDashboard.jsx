@@ -23,7 +23,8 @@ import {
   LogOut,
   Menu,
   Users,
-  Truck
+  Truck,
+  Trophy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, auth } from '../services/firebase';
@@ -606,6 +607,7 @@ const DriverDashboard = () => {
     rating: "4.8"
   });
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [leaderboard, setLeaderboard] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
   const [driverMode, setDriverMode] = useState('private');
   const [sharedRideRequests, setSharedRideRequests] = useState([]);
@@ -904,6 +906,14 @@ const DriverDashboard = () => {
       setSystemBroadcasts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return () => unsub();
+  }, [activeTab]);
+
+  // Leaderboard — top 10 drivers by total rides
+  useEffect(() => {
+    if (activeTab !== 'leaderboard') return;
+    getDocs(query(collection(db, 'drivers'), orderBy('totalRides', 'desc'), limit(10)))
+      .then(snap => setLeaderboard(snap.docs.map((d, i) => ({ rank: i + 1, id: d.id, ...d.data() }))))
+      .catch(console.error);
   }, [activeTab]);
 
   // Upcoming scheduled rides for this driver's vehicle type
@@ -1929,6 +1939,7 @@ const DriverDashboard = () => {
                 {[
                   { id: 'dashboard', icon: TrendingUp, label: 'Dashboard' },
                   { id: 'wallet', icon: IndianRupee, label: 'Wallet' },
+                  { id: 'leaderboard', icon: Trophy, label: 'Leaderboard' },
                   { id: 'profile_edit', icon: User, label: 'Profile Update' },
                   { id: 'verify', icon: ShieldCheck, label: 'KYC Verify' },
                   { id: 'messages', icon: Bell, label: 'Notifications' },
@@ -2943,6 +2954,42 @@ const DriverDashboard = () => {
                 <p className="text-center text-[9px] font-black text-slate-300 uppercase tracking-[0.3em] py-2">— End of History —</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── LEADERBOARD TAB ─────────────────────────────────────────────── */}
+      {activeTab === 'leaderboard' && (
+        <div className="fixed inset-0 z-40 bg-slate-50 pt-16 pb-20 overflow-y-auto">
+          <div className="max-w-md mx-auto px-6 py-6">
+            <div className="flex items-center gap-3 mb-6">
+              <Trophy size={22} className="text-amber-500" />
+              <h2 className="text-xl font-black text-slate-800">Driver Leaderboard</h2>
+            </div>
+            <div className="space-y-3">
+              {leaderboard.length === 0 ? (
+                <p className="text-center text-sm font-bold text-slate-400 py-12">Loading...</p>
+              ) : leaderboard.map((d) => {
+                const isMe = d.id === driverId;
+                const medal = d.rank === 1 ? '🥇' : d.rank === 2 ? '🥈' : d.rank === 3 ? '🥉' : `#${d.rank}`;
+                return (
+                  <div key={d.id} className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${isMe ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100'}`}>
+                    <span className="text-xl w-8 text-center shrink-0">{medal}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-black truncate ${isMe ? 'text-blue-700' : 'text-slate-800'}`}>{d.name || 'Driver'}{isMe ? ' (You)' : ''}</p>
+                      <p className="text-[10px] font-bold text-slate-400">{d.vehicleType === 'battery_rickshaw' ? 'E-Rickshaw' : 'Chhota Hathi'}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-black text-slate-800">{d.totalRides || 0} rides</p>
+                      <div className="flex items-center gap-0.5 justify-end">
+                        <Star size={10} className="text-amber-400 fill-amber-400" />
+                        <span className="text-[10px] font-black text-slate-500">{(d.rating || 5).toFixed(1)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

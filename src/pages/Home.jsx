@@ -179,6 +179,10 @@ const Home = () => {
   const [distance, setDistance] = useState(null);
   const [distanceKm, setDistanceKm] = useState(0);
   const [fare, setFare] = useState({ savaari: 0, logistics: 0 });
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState(null);
+  const [promoDiscount, setPromoDiscount] = useState(0);
+  const [promoChecking, setPromoChecking] = useState(false);
 
   const [bookingStatus, setBookingStatus] = useState('idle');
   const [bookingId, setBookingId] = useState(null);
@@ -230,6 +234,44 @@ const Home = () => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     toastTimeoutRef.current = setTimeout(() => setToast(null), 3500);
   }, []);
+
+  const handleApplyPromo = async () => {
+    const code = promoInput.trim().toUpperCase();
+    if (!code) return;
+    if (!user?.uid) { showToast('Pehle login karein.', 'error'); return; }
+    setPromoChecking(true);
+    try {
+      const snap = await getDocs(query(collection(db, 'promo_codes'), where('code', '==', code)));
+      if (snap.empty) { showToast('Invalid promo code.', 'error'); return; }
+      const promoDoc = snap.docs[0];
+      const promo = { id: promoDoc.id, ...promoDoc.data() };
+      if (!promo.isActive) { showToast('Ye code active nahi hai.', 'error'); return; }
+      if (promo.expiresAt && promo.expiresAt.toMillis() < Date.now()) { showToast('Ye code expire ho gaya.', 'error'); return; }
+      if (promo.maxUses > 0 && promo.usedCount >= promo.maxUses) { showToast('Ye code limit exceed kar chuka hai.', 'error'); return; }
+      const userSnap = await getDoc(doc(db, 'users', user.uid));
+      const used = userSnap.data()?.usedPromoCodes || [];
+      if (used.includes(code)) { showToast('Ye code aap pehle use kar chuke hain.', 'error'); return; }
+      const currentFare = service === 'savaari' ? fare.savaari : fare.logistics;
+      if (promo.minFare && currentFare < promo.minFare) {
+        showToast(`Minimum fare ₹${promo.minFare} chahiye is code ke liye.`, 'error'); return;
+      }
+      let discount = 0;
+      if (promo.discountType === 'percent') {
+        discount = Math.round(currentFare * promo.discountValue / 100);
+        if (promo.maxDiscount) discount = Math.min(discount, promo.maxDiscount);
+      } else {
+        discount = Math.min(promo.discountValue, currentFare - 1);
+      }
+      setAppliedPromo(promo);
+      setPromoDiscount(discount);
+      showToast(`Code applied! ₹${discount} discount milega.`, 'success');
+    } catch (e) {
+      console.error('Promo apply error:', e);
+      showToast('Error aaya. Dobara try karein.', 'error');
+    } finally {
+      setPromoChecking(false);
+    }
+  };
 
   // Route search filter
   useEffect(() => {
@@ -362,6 +404,9 @@ const Home = () => {
     setScheduledDateTime('');
     setSearchRadiusMsg(null);
     setNoDriverFound(false);
+    setPromoInput('');
+    setAppliedPromo(null);
+    setPromoDiscount(0);
     searchAbortRef.current = true;
     retryParamsRef.current = null;
     if (cancelTimeoutRef.current) { clearTimeout(cancelTimeoutRef.current); cancelTimeoutRef.current = null; }
@@ -1183,12 +1228,16 @@ const Home = () => {
     try {
       // Use the fare stored in Firestore (authoritative) — prevents ₹0 payment if
       // Google Maps route failed to load after a page reload before payment.
-      const amount = activeRide?.fareAmount || calculateFare();
+      const baseFareAmount = activeRide?.fareAmount || calculateFare();
+      const discount = appliedPromo ? promoDiscount : 0;
+      const amount = Math.max(1, baseFareAmount - discount);
       await updateDoc(doc(db, 'ride_requests', requestId), {
         status: 'payment_done',
         paymentStatus: 'completed',
         paymentMethod: method,
         fareAmount: amount,
+        promoCode: appliedPromo?.code || null,
+        promoDiscount: discount || null,
         razorpayPaymentId: response.razorpay_payment_id || null
       });
 
@@ -1197,10 +1246,23 @@ const Home = () => {
         userId: user.uid,
         driverId: driver.id,
         amount: amount,
+        promoCode: appliedPromo?.code || null,
+        promoDiscount: discount || null,
         status: 'success',
         method: method,
         timestamp: serverTimestamp()
       });
+
+      // Record promo usage atomically
+      if (appliedPromo) {
+        runTransaction(db, async (txn) => {
+          const promoRef = doc(db, 'promo_codes', appliedPromo.id);
+          const snap = await txn.get(promoRef);
+          if (!snap.exists() || !snap.data().isActive) return;
+          txn.update(promoRef, { usedCount: increment(1) });
+          txn.update(doc(db, 'users', user.uid), { usedPromoCodes: arrayUnion(appliedPromo.code) });
+        }).catch(() => {});
+      }
 
       const driverEarning = Math.round(amount * (1 - (config.commissionPercent || 8) / 100));
 
@@ -2463,6 +2525,17 @@ const Home = () => {
         )}
       </AnimatePresence>
 
+      {/* Promo Banner */}
+      {config.bannerEnabled && config.bannerText && (
+        <div className={`absolute top-0 left-0 right-0 z-[25] text-center text-[11px] font-black py-1.5 px-4 tracking-wide ${
+          config.bannerColor === 'blue' ? 'bg-blue-600 text-white' :
+          config.bannerColor === 'green' ? 'bg-emerald-600 text-white' :
+          config.bannerColor === 'red' ? 'bg-red-600 text-white' :
+          config.bannerColor === 'purple' ? 'bg-violet-600 text-white' :
+          'bg-orange-500 text-white'
+        }`}>{config.bannerText}</div>
+      )}
+
       {/* Compact search card — idle + private mode only */}
       {bookingStatus === 'idle' && rideMode === 'private' && (
         <motion.div
@@ -2595,7 +2668,45 @@ const Home = () => {
             {pickup && destination && distance && (
               <div className="flex items-center justify-between mb-3 px-1">
                 <span className="text-xs font-bold text-slate-400">{distance} km</span>
-                <span className="text-lg font-black text-slate-800">₹{service === 'savaari' ? fare.savaari : fare.logistics}</span>
+                <div className="flex items-center gap-2">
+                  {(computeFare(distanceKm, 0, service, config).isSurge) && (
+                    <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">⚡ SURGE {config.surgeMultiplier}x</span>
+                  )}
+                  {appliedPromo ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm font-black text-slate-400 line-through">₹{service === 'savaari' ? fare.savaari : fare.logistics}</span>
+                      <span className="text-lg font-black text-emerald-600">₹{Math.max(1, (service === 'savaari' ? fare.savaari : fare.logistics) - promoDiscount)}</span>
+                    </div>
+                  ) : (
+                    <span className="text-lg font-black text-slate-800">₹{service === 'savaari' ? fare.savaari : fare.logistics}</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Promo Code Input */}
+            {pickup && destination && distance && !appliedPromo && (
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  placeholder="Promo code"
+                  value={promoInput}
+                  onChange={e => setPromoInput(e.target.value.toUpperCase())}
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2.5 text-xs font-black text-slate-700 outline-none focus:border-blue-400 uppercase tracking-widest"
+                />
+                <button
+                  onClick={handleApplyPromo}
+                  disabled={!promoInput.trim() || promoChecking}
+                  className="px-4 py-2.5 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest disabled:opacity-40 active:scale-95 transition-all"
+                >
+                  {promoChecking ? '...' : 'Apply'}
+                </button>
+              </div>
+            )}
+            {appliedPromo && (
+              <div className="flex items-center justify-between mb-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-3 py-2">
+                <span className="text-[10px] font-black text-emerald-700">✓ {appliedPromo.code} — ₹{promoDiscount} off</span>
+                <button onClick={() => { setAppliedPromo(null); setPromoDiscount(0); setPromoInput(''); }} className="text-[10px] font-black text-red-400">Remove</button>
               </div>
             )}
 
