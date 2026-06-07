@@ -908,13 +908,21 @@ const DriverDashboard = () => {
     return () => unsub();
   }, [activeTab]);
 
-  // Leaderboard — top 10 drivers by total rides
+  // Leaderboard — top 10 drivers of same vehicle type (client-side filter avoids composite index)
   useEffect(() => {
     if (activeTab !== 'leaderboard') return;
-    getDocs(query(collection(db, 'drivers'), orderBy('totalRides', 'desc'), limit(10)))
-      .then(snap => setLeaderboard(snap.docs.map((d, i) => ({ rank: i + 1, id: d.id, ...d.data() }))))
+    getDocs(query(collection(db, 'drivers'), orderBy('totalRides', 'desc'), limit(100)))
+      .then(snap => {
+        const myType = profile?.vehicleType;
+        const filtered = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(d => !myType || d.vehicleType === myType)
+          .slice(0, 10)
+          .map((d, i) => ({ ...d, rank: i + 1 }));
+        setLeaderboard(filtered);
+      })
       .catch(console.error);
-  }, [activeTab]);
+  }, [activeTab, profile?.vehicleType]);
 
   // Upcoming scheduled rides for this driver's vehicle type
   useEffect(() => {
