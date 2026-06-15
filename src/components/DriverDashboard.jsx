@@ -24,7 +24,8 @@ import {
   Menu,
   Users,
   Truck,
-  Trophy
+  Trophy,
+  FileDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { db, auth } from '../services/firebase';
@@ -40,6 +41,8 @@ import { useRideHistory } from '../hooks/useRideHistory';
 import { useLanguage } from '../hooks/useLanguage';
 import LanguageToggle from './LanguageToggle';
 
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import { GoogleMap, useJsApiLoader, Marker, Polyline } from '@react-google-maps/api';
 const containerStyle = { width: '100%', height: '100%' };
 const center = { lat: 26.502, lng: 83.778 };
@@ -609,7 +612,7 @@ const DriverDashboard = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [leaderboard, setLeaderboard] = useState([]);
   const [isOnline, setIsOnline] = useState(false);
-  const [driverMode, setDriverMode] = useState('private');
+  const [driverMode, setDriverMode] = useState(() => localStorage.getItem('vahansetu_driverMode') || 'private');
   const [sharedRideRequests, setSharedRideRequests] = useState([]);
   const [activeSharedRide, setActiveSharedRide] = useState(null);
   const [sharedPassengers, setSharedPassengers] = useState([]);
@@ -718,6 +721,8 @@ const DriverDashboard = () => {
     const watchId = navigator.geolocation.watchPosition(
       async (pos) => {
         try {
+        // GPS recovered — clear any previous error
+        setLocationError(null);
         const { latitude, longitude, speed, heading } = pos.coords;
         const now = Date.now();
         const elapsed = (now - lastPositionTime) / 1000;
@@ -837,6 +842,10 @@ const DriverDashboard = () => {
 
         if (!profileLoadedRef.current) {
           profileLoadedRef.current = true;
+          if (data.rideMode) {
+            setDriverMode(data.rideMode);
+            localStorage.setItem('vahansetu_driverMode', data.rideMode);
+          }
           setIsLoading(false);
         }
       } else if (!profileLoadedRef.current) {
@@ -1065,12 +1074,14 @@ const DriverDashboard = () => {
     audio.play().catch(() => {});
     if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]);
     // Show a brief browser notification even in foreground for visibility
-    if (Notification.permission === 'granted') {
-      new Notification(payload.notification?.title || 'VahanSetu', {
-        body: payload.notification?.body,
-        icon: '/pwa-192x192.png',
-        tag: payload.data?.rideId || 'ride-request'
-      });
+    if ('Notification' in window && Notification.permission === 'granted') {
+      navigator.serviceWorker?.ready.then(reg => {
+        reg.showNotification(payload.notification?.title || 'VahanSetu', {
+          body: payload.notification?.body,
+          icon: '/pwa-192x192.png',
+          tag: payload.data?.rideId || 'ride-request'
+        });
+      }).catch(() => {});
     }
   });
 
@@ -1085,14 +1096,20 @@ const DriverDashboard = () => {
     }
 
     const newStatus = !isOnline;
-    await updateDoc(doc(db, 'drivers', driverId), { isOnline: newStatus });
-    setIsOnline(newStatus);
+    try {
+      await updateDoc(doc(db, 'drivers', driverId), { isOnline: newStatus });
+      setIsOnline(newStatus);
+    } catch (err) {
+      console.error('[toggleStatus] Firestore error:', err);
+      showToast('Status update nahi hua. Network check karein.', 'error');
+    }
   };
 
   // ── Shared Ride ───────────────────────────────────────────────────────────
 
   const handleToggleDriverMode = async (mode) => {
     setDriverMode(mode);
+    localStorage.setItem('vahansetu_driverMode', mode);
     if (driverId) await updateDoc(doc(db, 'drivers', driverId), { rideMode: mode });
   };
 
@@ -1118,13 +1135,28 @@ const DriverDashboard = () => {
     return () => unsub();
   }, [activeSharedRide?.id]);
 
-  // FIX 1: Notify driver when new passenger joins active shared ride
+  // FIX 1: Notify driver when new passenger joins; auto-hide card when ride ends
   useEffect(() => {
     if (!activeSharedRide?.id) return;
     prevPassengerCountRef.current = activeSharedRide.passengers?.length || 0;
     const unsub = onSnapshot(doc(db, 'shared_rides', activeSharedRide.id), (snap) => {
-      if (!snap.exists()) return;
+      if (!snap.exists()) {
+        setActiveSharedRide(null);
+        setSharedPassengers([]);
+        setRouteStops([]);
+        setCurrentStopIndex(0);
+        setIsSharedCardMinimized(false);
+        return;
+      }
       const data = snap.data();
+      if (data.status === 'completed' || data.status === 'cancelled') {
+        setActiveSharedRide(null);
+        setSharedPassengers([]);
+        setRouteStops([]);
+        setCurrentStopIndex(0);
+        setIsSharedCardMinimized(false);
+        return;
+      }
       const newCount = data.passengers?.length || 0;
       const prevCount = prevPassengerCountRef.current;
       if (newCount > prevCount) {
@@ -1207,12 +1239,85 @@ const DriverDashboard = () => {
 
   const handleCompleteSharedTrip = async () => {
     if (!activeSharedRide?.id) return;
-    await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), { status: 'completed' });
+    try {
+      // Force-drop any passengers still onboard so earnings are recorded
+      for (const p of sharedPassengers.filter(p => p.status === 'onboard')) {
+        await handleDropPassenger(p.id, p.fare, p.seats || 1);
+      }
+      await updateDoc(doc(db, 'shared_rides', activeSharedRide.id), { status: 'completed' });
+    } catch (e) {
+      console.error('Complete shared trip error:', e);
+      showToast('यात्रा समाप्त करने में समस्या आई।', 'error');
+      return;
+    }
     setActiveSharedRide(null);
     setSharedPassengers([]);
     setRouteStops([]);
     setCurrentStopIndex(0);
     setIsSharedCardMinimized(false);
+  };
+
+  const handleDownloadDriverPDF = () => {
+    const doc = new jsPDF();
+    const dateStr = new Date().toLocaleDateString('en-IN');
+
+    // Header
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('VahanSetu ApniGadi', 14, 20);
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Driver Earnings Report', 14, 29);
+    doc.text(`Driver: ${profile?.name || 'N/A'}`, 14, 37);
+    doc.text(`Vehicle: ${profile?.vehicleType || 'N/A'}`, 14, 44);
+    doc.text(`Generated: ${dateStr}`, 14, 51);
+
+    // Divider
+    doc.setDrawColor(59, 130, 246);
+    doc.setLineWidth(0.8);
+    doc.line(14, 56, 196, 56);
+
+    // Summary
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Summary', 14, 65);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Total Earnings:  Rs.${Number(stats.totalEarnings || 0).toFixed(0)}`, 14, 74);
+    doc.text(`Wallet Balance:  Rs.${Number(stats.walletBalance || 0).toFixed(2)}`, 14, 81);
+    doc.text(`Total Rides:     ${stats.rides || 0}`, 14, 88);
+    doc.text(`Rating:          ${stats.rating || 'N/A'} / 5`, 14, 95);
+
+    // Transactions table
+    const txRows = walletTransactions.map(tx => {
+      const typeMap = {
+        commission_deducted: 'Cash Ride',
+        online_earned: 'Online Ride',
+        earned: 'Ride',
+        shared_ride_earning: 'Shared Ride',
+        admin_credit: 'Admin Credit',
+        withdrawn: 'Withdrawal',
+        cancel_penalty: 'Cancel Penalty',
+      };
+      const sign = ['commission_deducted', 'withdrawn', 'cancel_penalty'].includes(tx.type) ? '-' : '+';
+      return [
+        tx.createdAt?.toDate?.()?.toLocaleDateString('en-IN') || '-',
+        typeMap[tx.type] || tx.type || '-',
+        `${sign}Rs.${tx.amount || 0}`,
+      ];
+    });
+
+    doc.autoTable({
+      startY: 105,
+      head: [['Date', 'Type', 'Amount']],
+      body: txRows.length > 0 ? txRows : [['No transactions', '', '']],
+      headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold', fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      margin: { left: 14, right: 14 },
+    });
+
+    doc.save(`VahanSetu_Earnings_${Date.now()}.pdf`);
   };
 
   const handleStopReached = async (stopIndex) => {
@@ -1411,12 +1516,17 @@ const DriverDashboard = () => {
     }
 
     if (enteredOtp.trim() === newRequest.otp?.toString().trim()) {
-      await updateDoc(doc(db, 'ride_requests', newRequest.id), {
-        status: 'started',
-        startedAt: serverTimestamp()
-      });
-      setEnteredOtp('');
-      setIsDriverCardMinimized(true);
+      try {
+        await updateDoc(doc(db, 'ride_requests', newRequest.id), {
+          status: 'started',
+          startedAt: serverTimestamp()
+        });
+        setEnteredOtp('');
+        setIsDriverCardMinimized(true);
+      } catch (err) {
+        console.error('[handleVerifyOtp] Firestore error:', err);
+        showToast('Yatra shuru nahi ho saki. Network check karein.', 'error');
+      }
     } else {
       showToast('Galat OTP. Passenger se sahi code maangein.', 'error');
     }
@@ -1427,9 +1537,14 @@ const DriverDashboard = () => {
     if (waitingSecondsRef.current > 0) {
       updates.waitingSeconds = Math.round(waitingSecondsRef.current);
     }
-    await updateDoc(doc(db, 'ride_requests', newRequest.id), updates);
-    // Save ride ID so payment card survives page refresh
-    localStorage.setItem('pendingPaymentRideId', newRequest.id);
+    try {
+      await updateDoc(doc(db, 'ride_requests', newRequest.id), updates);
+      // Save ride ID so payment card survives page refresh
+      localStorage.setItem('pendingPaymentRideId', newRequest.id);
+    } catch (err) {
+      console.error('[handleCompleteRide] Firestore error:', err);
+      showToast('Ride complete nahi hui. Network check karein.', 'error');
+    }
   };
 
   // Fare breakup for active completed ride (in newRequest card)
@@ -1465,16 +1580,12 @@ const DriverDashboard = () => {
         const rideRef = doc(db, 'ride_requests', ride.id);
         const rideSnap = await txn.get(rideRef);
         if (!rideSnap.exists()) throw new Error('Ride not found');
-        if (rideSnap.data().status === 'payment_done' || rideSnap.data().status === 'paid') {
-          throw new Error('already_paid');
-        }
-        txn.update(rideRef, {
-          status: 'payment_done',
-          paymentMethod: 'cash',
-          paymentStatus: 'completed',
-          fareAmount: finalFare,
-          paidAt: serverTimestamp(),
-        });
+        const rideData = rideSnap.data();
+        const alreadyDone = rideData.status === 'payment_done' || rideData.status === 'paid';
+        // Passenger ne pehle hi confirm kiya AND wallet update bhi hua — skip
+        if (alreadyDone && rideData.cashCredited) throw new Error('already_paid');
+
+        // Wallet update (chahe status pehle se payment_done ho ya abhi set ho rahi ho)
         txn.update(doc(db, 'drivers', driverId), {
           walletBalance: increment(-commission),
           totalEarnings: increment(finalFare),
@@ -1491,6 +1602,20 @@ const DriverDashboard = () => {
           createdAt: serverTimestamp(),
         });
         txn.set(doc(db, 'config', 'stats'), { totalRevenue: increment(finalFare) }, { merge: true });
+
+        if (!alreadyDone) {
+          txn.update(rideRef, {
+            status: 'payment_done',
+            paymentMethod: 'cash',
+            paymentStatus: 'completed',
+            fareAmount: finalFare,
+            paidAt: serverTimestamp(),
+            cashCredited: true,
+          });
+        } else {
+          // Status pehle se set hai, sirf cashCredited mark karo
+          txn.update(rideRef, { cashCredited: true });
+        }
       });
       // Clear pending payment state after success
       localStorage.removeItem('pendingPaymentRideId');
@@ -1860,6 +1985,17 @@ const DriverDashboard = () => {
         </div>
       </div>
 
+      {/* GPS Error Banner — shown prominently when driver is online and GPS fails */}
+      {isOnline && locationError && (
+        <div className="fixed top-[4rem] left-0 right-0 z-40 px-3 pt-2">
+          <div className="flex items-center gap-2 bg-red-600 text-white text-[11px] font-bold px-4 py-2.5 rounded-2xl shadow-lg shadow-red-600/30">
+            <span className="text-base">📡</span>
+            <span className="flex-1">{locationError}</span>
+            <button onClick={() => setLocationError(null)} className="text-white/70 hover:text-white font-black text-sm leading-none">✕</button>
+          </div>
+        </div>
+      )}
+
       {/* Ride Mode Toggle — only when online */}
       {isOnline && (
         <div className="fixed top-[4.5rem] left-3 right-3 z-30">
@@ -2202,7 +2338,8 @@ const DriverDashboard = () => {
                         {t('stopReached')}
                       </button>
                     )}
-                    {sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done') && (
+                    {((sharedPassengers.length > 0 && sharedPassengers.every(p => p.status === 'done'))
+                      || (routeStops.length > 0 && currentStopIndex >= routeStops.length - 1)) && (
                       <button onClick={handleCompleteSharedTrip}
                         className="w-full py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest">
                         {t('tripComplete')} ✓
@@ -2648,7 +2785,15 @@ const DriverDashboard = () => {
 
             {/* Recent Transactions */}
             <div className="pt-4">
-              <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-2">Transactions</h3>
+              <div className="flex items-center justify-between mb-4 ml-2">
+                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Transactions</h3>
+                <button
+                  onClick={handleDownloadDriverPDF}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-blue-600/20"
+                >
+                  <FileDown size={12} /> PDF Report
+                </button>
+              </div>
               <div className="space-y-3">
                 {walletTransactions.filter(tx => {
                   if (earningsFilter === 'all') return true;

@@ -120,6 +120,7 @@ export const RideProvider = ({ children }) => {
         const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
         const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
         const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000;
+        const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
         const docs = snapshot.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .filter(d => {
@@ -127,7 +128,9 @@ export const RideProvider = ({ children }) => {
             if (!d.status || !validStatuses.includes(d.status)) return false;
             const createdAt = d.createdAt?.toMillis() || 0;
             if (d.status === 'pending' && createdAt < thirtyMinAgo) return false;
-            if (['completed', 'payment_done'].includes(d.status) && createdAt < twoHoursAgo) return false;
+            // 'completed' = payment baaki hai — 12 ghante tak restore karo
+            if (d.status === 'completed' && createdAt < twelveHoursAgo) return false;
+            if (d.status === 'payment_done' && createdAt < twoHoursAgo) return false;
             if (['accepted', 'started'].includes(d.status) && createdAt < fourHoursAgo) return false;
             return true;
           });

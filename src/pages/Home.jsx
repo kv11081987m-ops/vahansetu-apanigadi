@@ -228,6 +228,10 @@ const Home = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [sharedDriverLocation, setSharedDriverLocation] = useState(null);
   const [sharedDriverHeading, setSharedDriverHeading] = useState(0);
+  const [dropStopCoords, setDropStopCoords] = useState(null);
+  const [showDropConfirm, setShowDropConfirm] = useState(false);
+  const stopAlertShownRef = useRef(false);
+  const autoDropTimerRef = useRef(null);
   const toastTimeoutRef = useRef(null);
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
@@ -531,10 +535,12 @@ const Home = () => {
       proximityAlertFiredRef.current = true;
       showToast('Driver aapke paas aa gaya! 500m se kam doori reh gayi hai.', 'success');
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('Driver Aa Raha Hai!', {
-          body: 'Aapka driver pickup point ke paas pahunch gaya hai.',
-          icon: '/favicon.ico'
-        });
+        navigator.serviceWorker?.ready.then(reg => {
+          reg.showNotification('Driver Aa Raha Hai!', {
+            body: 'Aapka driver pickup point ke paas pahunch gaya hai.',
+            icon: '/favicon.ico'
+          });
+        }).catch(() => {});
       }
     }
   }, [driverLiveLocation, bookingStatus, pickup, showToast]);
@@ -768,6 +774,75 @@ const Home = () => {
     };
   }, [sharedBookingId, sharedBookingStatus]);
 
+  // Fetch coordinates for passenger's drop stop when booking is confirmed.
+  // Tries stopCoordinates[] in the route doc first; falls back to Google Geocoding.
+  useEffect(() => {
+    if (!sharedBookingId || !selectedRoute || !selectedDropStop) return;
+    if (sharedBookingStatus !== 'booked' && sharedBookingStatus !== 'onboard') return;
+
+    const fetchStopCoords = async () => {
+      try {
+        const routeDoc = await getDoc(doc(db, 'shared_routes', selectedRoute.id));
+        if (!routeDoc.exists()) return;
+        const routeData = routeDoc.data();
+        const stopIndex = routeData.stops.indexOf(selectedDropStop);
+        if (stopIndex === -1) return;
+
+        if (routeData.stopCoordinates?.[stopIndex]) {
+          setDropStopCoords(routeData.stopCoordinates[stopIndex]);
+        } else if (window.google?.maps?.Geocoder) {
+          const geocoder = new window.google.maps.Geocoder();
+          geocoder.geocode(
+            { address: selectedDropStop + ', Deoria, UP, India' },
+            (results, status) => {
+              if (status === 'OK' && results[0]) {
+                const loc = results[0].geometry.location;
+                setDropStopCoords({ lat: loc.lat(), lng: loc.lng() });
+              }
+            }
+          );
+        }
+      } catch (e) {
+        console.error('Stop coords error:', e);
+      }
+    };
+
+    fetchStopCoords();
+  }, [sharedBookingId, selectedRoute, selectedDropStop, sharedBookingStatus]);
+
+  // Proximity detection: watch driver location vs passenger's drop stop.
+  // 300 m → alert toast + vibration
+  //  50 m → confirmation popup + 2-min auto-drop timer
+  useEffect(() => {
+    if (!sharedDriverLocation || !dropStopCoords) return;
+    if (sharedBookingStatus !== 'onboard') return;
+
+    const dist = calculateDistance(
+      sharedDriverLocation.lat, sharedDriverLocation.lng,
+      dropStopCoords.lat, dropStopCoords.lng
+    );
+
+    if (dist <= 0.3 && !stopAlertShownRef.current) {
+      stopAlertShownRef.current = true;
+      showToast('🔔 आपका स्टॉप आने वाला है!', 'info');
+      if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+    }
+
+    if (dist <= 0.05 && !autoDropTimerRef.current) {
+      setShowDropConfirm(true);
+      autoDropTimerRef.current = setTimeout(() => {
+        handlePassengerSelfDrop();
+      }, 2 * 60 * 1000);
+    }
+  }, [sharedDriverLocation, dropStopCoords, sharedBookingStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup auto-drop timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoDropTimerRef.current) clearTimeout(autoDropTimerRef.current);
+    };
+  }, []);
+
   const calculateSharedFare = (route, boardingStop, dropStop) => {
     const boardingIdx = route.stops.indexOf(boardingStop);
     const dropIdx = route.stops.indexOf(dropStop);
@@ -893,6 +968,10 @@ const Home = () => {
     setSelectedSeats(1);
     setSharedDriverLocation(null);
     setSharedDriverHeading(0);
+    setDropStopCoords(null);
+    setShowDropConfirm(false);
+    stopAlertShownRef.current = false;
+    if (autoDropTimerRef.current) { clearTimeout(autoDropTimerRef.current); autoDropTimerRef.current = null; }
   };
 
   // BUG 3 FIX: cancel shared booking and restore seats
@@ -915,6 +994,41 @@ const Home = () => {
       console.error('Cancel shared booking error:', err);
     }
     handleSharedReset();
+  };
+
+  const handlePassengerSelfDrop = async () => {
+    if (!sharedBookingId) return;
+    if (autoDropTimerRef.current) {
+      clearTimeout(autoDropTimerRef.current);
+      autoDropTimerRef.current = null;
+    }
+    setShowDropConfirm(false);
+    try {
+      const bookingSnap = await getDoc(doc(db, 'shared_bookings', sharedBookingId));
+      if (!bookingSnap.exists()) return;
+      const bookingData = bookingSnap.data();
+      if (bookingData.status === 'done') { setSharedBookingStatus('done'); return; }
+
+      await updateDoc(doc(db, 'shared_bookings', sharedBookingId), {
+        status: 'done',
+        selfDropped: true,
+        droppedAt: new Date().toISOString(),
+      });
+
+      if (bookingData.rideId) {
+        await updateDoc(doc(db, 'shared_rides', bookingData.rideId), {
+          availableSeats: increment(bookingData.seats || 1),
+        });
+      }
+
+      setSharedBookingStatus('done');
+      stopAlertShownRef.current = false;
+      setDropStopCoords(null);
+      showToast('✅ यात्रा पूर्ण! चालक को नकद दें।', 'success');
+    } catch (e) {
+      console.error('Self drop error:', e);
+      showToast('Error aaya. Dobara try karein.', 'error');
+    }
   };
 
   // On-mount recovery: restore active shared booking after page refresh
@@ -1037,6 +1151,16 @@ const Home = () => {
       ...logisticsData
     });
 
+    // Guard: if user cancelled while addDoc was in-flight, cancel the doc and bail
+    if (searchAbortRef.current) {
+      try {
+        await updateDoc(doc(db, 'ride_requests', requestRef.id), {
+          status: 'cancelled', cancelledBy: 'system', cancellationReason: 'search_aborted'
+        });
+      } catch { /* best-effort */ }
+      return;
+    }
+
     setRequestId(requestRef.id);
 
     // Auto-cancel if no driver accepts within 5 minutes
@@ -1096,6 +1220,12 @@ const Home = () => {
       }
     });
     activeRequestUnsubRef.current = unsub;
+
+    // Double-guard: if handleReset fired between onSnapshot creation and storage, clean up now
+    if (searchAbortRef.current) {
+      unsub();
+      activeRequestUnsubRef.current = null;
+    }
   };
 
   const handleRetrySearch = () => {
@@ -1226,17 +1356,46 @@ const Home = () => {
     setBookingStatus('payment_done');
 
     try {
-      // Use the fare stored in Firestore (authoritative) — prevents ₹0 payment if
-      // Google Maps route failed to load after a page reload before payment.
-      const baseFareAmount = activeRide?.fareAmount || calculateFare();
-      const discount = appliedPromo ? promoDiscount : 0;
+      // Screen pe jo dikhta hai woh authoritative hai (includes waiting/night charges).
+      // activeRide.fareAmount sirf fallback hai (page reload ke baad Maps fail ho).
+      const baseFareAmount = currentFareBreakup.total || activeRide?.fareAmount || 0;
+
+      // Validate + claim promo slot atomically BEFORE recording payment.
+      // This prevents two users from consuming the last slot simultaneously and
+      // ensures the discount is only applied when the slot is confirmed reserved.
+      let effectiveDiscount = 0;
+      if (appliedPromo) {
+        try {
+          await runTransaction(db, async (txn) => {
+            const promoRef = doc(db, 'promo_codes', appliedPromo.id);
+            const snap = await txn.get(promoRef);
+            if (!snap.exists()) throw new Error('promo_invalid');
+            const data = snap.data();
+            if (!data.isActive) throw new Error('promo_inactive');
+            if (data.maxUses > 0 && data.usedCount >= data.maxUses) throw new Error('promo_exhausted');
+            if (data.expiresAt && data.expiresAt.toDate() < new Date()) throw new Error('promo_expired');
+            txn.update(promoRef, { usedCount: increment(1) });
+            txn.update(doc(db, 'users', user.uid), { usedPromoCodes: arrayUnion(appliedPromo.code) });
+          });
+          effectiveDiscount = promoDiscount;
+        } catch (promoErr) {
+          const reason = promoErr?.message;
+          if (reason === 'promo_exhausted' || reason === 'promo_expired' || reason === 'promo_inactive') {
+            showToast('Promo code ab valid nahi — full fare charge hoga.', 'error');
+          }
+          // On network errors also fall back to full fare for safety
+          effectiveDiscount = 0;
+        }
+      }
+
+      const discount = effectiveDiscount;
       const amount = Math.max(1, baseFareAmount - discount);
       await updateDoc(doc(db, 'ride_requests', requestId), {
         status: 'payment_done',
         paymentStatus: 'completed',
         paymentMethod: method,
         fareAmount: amount,
-        promoCode: appliedPromo?.code || null,
+        promoCode: discount > 0 ? (appliedPromo?.code || null) : null,
         promoDiscount: discount || null,
         razorpayPaymentId: response.razorpay_payment_id || null
       });
@@ -1246,31 +1405,44 @@ const Home = () => {
         userId: user.uid,
         driverId: driver.id,
         amount: amount,
-        promoCode: appliedPromo?.code || null,
+        promoCode: discount > 0 ? (appliedPromo?.code || null) : null,
         promoDiscount: discount || null,
         status: 'success',
         method: method,
+        confirmedBy: method === 'cash' ? 'passenger' : 'system',
         timestamp: serverTimestamp()
       });
-
-      // Record promo usage atomically
-      if (appliedPromo) {
-        runTransaction(db, async (txn) => {
-          const promoRef = doc(db, 'promo_codes', appliedPromo.id);
-          const snap = await txn.get(promoRef);
-          if (!snap.exists() || !snap.data().isActive) return;
-          txn.update(promoRef, { usedCount: increment(1) });
-          txn.update(doc(db, 'users', user.uid), { usedPromoCodes: arrayUnion(appliedPromo.code) });
-        }).catch(() => {});
-      }
 
       const driverEarning = Math.round(amount * (1 - (config.commissionPercent || 8) / 100));
 
       if (method === 'cash') {
-        // Cash: driver physically collected full amount.
-        // Commission deduction is handled exclusively by driver's handleCashCollected
-        // (runTransaction with already_paid guard) to prevent double-deduction.
-        // Passenger side only marks ride status + records the transaction log.
+        // cashCredited guard prevents double-deduction if driver also clicks "Cash Mila"
+        const commission = Math.round(amount * ((config.commissionPercent || 8) / 100));
+        try {
+          await runTransaction(db, async (txn) => {
+            const rideSnap = await txn.get(doc(db, 'ride_requests', requestId));
+            if (rideSnap.data()?.cashCredited) return; // driver ne pehle update kar diya
+            txn.update(doc(db, 'ride_requests', requestId), { cashCredited: true });
+            txn.update(doc(db, 'drivers', driver.id), {
+              walletBalance: increment(-commission),
+              totalEarnings: increment(amount),
+              cashEarnings: increment(amount),
+              totalRides: increment(1),
+            });
+            txn.set(doc(collection(db, 'wallet_transactions')), {
+              driverId: driver.id,
+              amount: commission,
+              fareCollected: amount,
+              type: 'commission_deducted',
+              status: 'completed',
+              note: `Cash ride (passenger confirmed) - Fare ₹${amount}, Commission ₹${commission}`,
+              createdAt: serverTimestamp(),
+            });
+          });
+        } catch (cashErr) {
+          console.warn('[cash-wallet]', cashErr);
+          // Non-critical — payment status set hai, admin wallet manually fix kar sakta hai
+        }
       } else {
         // Online: platform has money — credit 92.5% after commission
         await updateDoc(doc(db, 'drivers', driver.id), {
@@ -1355,7 +1527,7 @@ const Home = () => {
       await handlePaymentSuccess('cash');
     } catch (err) {
       console.error('Cash payment error:', err);
-      showToast('Payment mein error aaya. Dobara try karein.', 'error');
+      showToast('Cash payment mein error aaya. Dobara try karein.', 'error');
     } finally {
       setIsPaymentLoading(false);
     }
@@ -2869,6 +3041,34 @@ const Home = () => {
         </div>
       )}
 
+      {/* Drop Confirmation Popup — shown when driver is within 50m of drop stop */}
+      {showDropConfirm && sharedBookingStatus === 'onboard' && (
+        <div className="fixed inset-0 z-[500] bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm text-center shadow-2xl">
+            <div className="text-5xl mb-4">🚏</div>
+            <h3 className="text-xl font-black text-slate-800 mb-2">क्या आप उतर गए?</h3>
+            <p className="text-sm text-slate-500 font-bold mb-1">{selectedDropStop}</p>
+            <p className="text-xs text-slate-400 mb-6">पर आपकी यात्रा समाप्त होती है</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowDropConfirm(false);
+                  if (autoDropTimerRef.current) { clearTimeout(autoDropTimerRef.current); autoDropTimerRef.current = null; }
+                }}
+                className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-sm">
+                नहीं, अभी नहीं
+              </button>
+              <button
+                onClick={handlePassengerSelfDrop}
+                className="flex-1 py-3 bg-emerald-500 text-white rounded-2xl font-black text-sm shadow-lg shadow-emerald-500/30">
+                हाँ, उतर गया ✓
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-3">2 मिनट में स्वतः पूर्ण होगा</p>
+          </div>
+        </div>
+      )}
+
       {/* Shared Ride Status Panel */}
       {rideMode === 'shared' && ['booked', 'driver_assigned', 'onboard', 'done'].includes(sharedBookingStatus) && (
         <motion.div initial={{ y: '100%' }} animate={{ y: 0 }}
@@ -2931,6 +3131,20 @@ const Home = () => {
               <div className="text-5xl">🛺</div>
               <h3 className="text-xl font-black text-slate-800">{t('onboard')} 🛺</h3>
               <p className="text-sm text-slate-500 font-bold">ApniGadi आपको छोड़ेगी</p>
+              {dropStopCoords && sharedDriverLocation && (() => {
+                const dist = calculateDistance(
+                  sharedDriverLocation.lat, sharedDriverLocation.lng,
+                  dropStopCoords.lat, dropStopCoords.lng
+                );
+                const distLabel = dist < 1 ? `${Math.round(dist * 1000)} मी` : `${dist.toFixed(1)} किमी`;
+                const isClose = dist <= 0.3;
+                return (
+                  <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-black ${isClose ? 'bg-amber-100 text-amber-700' : 'bg-blue-50 text-blue-600'}`}>
+                    <span>🚏</span>
+                    <span>{selectedDropStop} — {distLabel} दूर</span>
+                  </div>
+                );
+              })()}
               {isLoaded && sharedDriverLocation && (
                 <div className="w-full" style={{ height: '180px', borderRadius: '16px', overflow: 'hidden' }}>
                   <GoogleMap

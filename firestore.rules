@@ -44,16 +44,18 @@ service cloud.firestore {
 
       allow create: if isOwner(userId)
         && request.resource.data.uid == userId
-        && request.resource.data.role in ['customer', 'driver', 'new_user', 'admin'];
+        && request.resource.data.role in ['customer', 'driver', 'new_user'];
 
       // Owner can update their own profile, but cannot change role/uid/displayId
       allow update: if isOwner(userId)
         && !changedFields().hasAny(['role', 'uid', 'displayId']);
 
       // Referral bonus: any authenticated user can increment another user's balance
-      // (called in registerUser() when a referral code is used)
+      // (called in registerUser() when a referral code is used).
+      // Cap: new balance must not exceed current + 100 to prevent arbitrary large writes.
       allow update: if isLoggedIn()
-        && changedFields().hasOnly(['balance']);
+        && changedFields().hasOnly(['balance'])
+        && request.resource.data.balance <= resource.data.balance + 100;
 
       allow update: if isAdmin();
     }
@@ -78,7 +80,7 @@ service cloud.firestore {
       // Field-list restriction prevents arbitrary value manipulation.
       allow update: if isCustomer()
         && changedFields().hasOnly([
-             'walletBalance', 'totalEarnings', 'onlineEarnings', 'totalRides',
+             'walletBalance', 'totalEarnings', 'onlineEarnings', 'cashEarnings', 'totalRides',
              'rating', 'ratingCount'
            ]);
 
@@ -116,12 +118,16 @@ service cloud.firestore {
              'status', 'paymentStatus', 'paymentMethod',
              'fareAmount', 'razorpayPaymentId', 'userRating',
              'emergencyTriggeredBy', 'emergencyTime',
-             'cancellationReason', 'cancelledBy'
+             'cancellationReason', 'cancelledBy',
+             'promoCode', 'promoDiscount', 'cashCredited'
            ])
         // Restrict status to valid customer-settable values only
         && (!changedFields().hasAny(['status']) || request.resource.data.status in ['cancelled', 'emergency', 'payment_done', 'finished']);
 
-      // Driver can accept broadcast rides and update ride-lifecycle fields only
+      // Driver can accept broadcast rides and update ride-lifecycle fields only.
+      // fareAmount: driver may write it only when simultaneously confirming payment
+      // (status → 'payment_done'), i.e. the cash-collection transaction. This closes
+      // the window where a driver could inflate fareAmount before the passenger pays.
       allow update: if isDriver()
         && (
           resource.data.driverId == request.auth.uid ||
@@ -132,7 +138,10 @@ service cloud.firestore {
              'vehicleNumber', 'driverVehicle',
              'startedAt', 'paidAt', 'cancelledReason', 'cancelledBy', 'waitingSeconds',
              'fareAmount', 'paymentMethod', 'paymentStatus', 'rejectedBy'
-           ]);
+           ])
+        && (!changedFields().hasAny(['fareAmount'])
+            || (changedFields().hasAny(['status'])
+                && request.resource.data.status == 'payment_done'));
 
       allow read, write: if isAdmin();
     }
@@ -191,9 +200,11 @@ service cloud.firestore {
         resource.data.driverId == request.auth.uid || isAdmin()
       );
 
-      // Only the owner driver or admin can create wallet transaction records
+      // Driver creates own records; passenger creates commission record for cash rides
       allow create: if isLoggedIn() && (
-        request.resource.data.driverId == request.auth.uid || isAdmin()
+        request.resource.data.driverId == request.auth.uid ||
+        (isCustomer() && request.resource.data.type == 'commission_deducted') ||
+        isAdmin()
       );
       allow update, delete: if isAdmin();
     }
@@ -242,7 +253,10 @@ service cloud.firestore {
     match /shared_rides/{rideId} {
       allow read: if isLoggedIn();
       allow create: if isCustomer();
-      allow update: if isCustomer() || isDriver() || isAdmin();
+      // Customer can only update rides they are a passenger in; driver updates their own.
+      allow update: if isAdmin()
+        || isDriver()
+        || (isCustomer() && resource.data.passengers.hasAny([request.auth.uid]));
       allow delete: if isAdmin();
     }
 
@@ -281,6 +295,15 @@ service cloud.firestore {
     }
 
 
+    // ── PROMO CODES ───────────────────────────────────────────────────────────
+    match /promo_codes/{codeId} {
+      // Any logged-in user can read to validate code before payment
+      allow read: if isLoggedIn();
+      // Only admin can create/update/delete promo codes
+      allow create, update, delete: if isAdmin();
+    }
+
+
     // ── ID LOOKUP ─────────────────────────────────────────────────────────────
     // Public mapping: displayId → phone number, used for pre-auth VS-ID login.
     // Only contains phone — no other PII. Readable without auth intentionally.
@@ -300,7 +323,10 @@ service cloud.firestore {
         isAdmin()
       );
 
-      allow create: if isLoggedIn();
+      // Only create notifications addressed to yourself (system/FCM creates others via Admin SDK)
+      allow create: if isLoggedIn()
+        && (request.resource.data.userId == request.auth.uid
+            || request.resource.data.driverId == request.auth.uid);
 
       // Only the recipient or admin can mark as read/update
       allow update: if isLoggedIn() && (

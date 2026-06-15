@@ -22,13 +22,13 @@ const ActiveRideBar = () => {
       limit(20)
     );
 
-    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
+    const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
     const activeStatuses = new Set(['pending', 'accepted', 'started', 'completed', 'payment_done', 'awaiting_confirmation']);
 
     const unsub = onSnapshot(q, (snapshot) => {
       const ride = snapshot.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(d => activeStatuses.has(d.status) && (d.createdAt?.toMillis() || 0) >= sixHoursAgo)
+        .filter(d => activeStatuses.has(d.status) && (d.createdAt?.toMillis() || 0) >= twelveHoursAgo)
         .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0))[0] || null;
       setActiveRide(ride);
     });

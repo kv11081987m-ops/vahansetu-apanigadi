@@ -6,6 +6,7 @@ import { LanguageProvider } from './hooks/useLanguage'
 import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 
 // Register PWA Service Worker
 const updateSW = registerSW({
@@ -21,12 +22,14 @@ const updateSW = registerSW({
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <LanguageProvider>
-      <AuthProvider>
-        <RideProvider>
-          <App />
-        </RideProvider>
-      </AuthProvider>
-    </LanguageProvider>
+    <ErrorBoundary>
+      <LanguageProvider>
+        <AuthProvider>
+          <RideProvider>
+            <App />
+          </RideProvider>
+        </AuthProvider>
+      </LanguageProvider>
+    </ErrorBoundary>
   </StrictMode>,
 )

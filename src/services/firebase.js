@@ -2,6 +2,8 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getMessaging } from "firebase/messaging";
+import { getFunctions } from "firebase/functions";
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -13,7 +15,23 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+
+// App Check — Bot/Abuse protection
+if (typeof window !== 'undefined') {
+  try {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(
+        '6LfMLyAtAAAAAJA_Tlnw50jWdG17axrtpT2lYuW4'
+      ),
+      isTokenAutoRefreshEnabled: true
+    });
+  } catch (e) {
+    console.warn('[AppCheck] init failed:', e);
+  }
+}
+
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const functions = getFunctions(app, 'asia-south1');
 export const messaging = typeof window !== "undefined" ? getMessaging(app) : null;
 export default app;
