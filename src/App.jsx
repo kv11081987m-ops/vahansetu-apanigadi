@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
+import DriverLogin from './pages/DriverLogin';
 import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import ActiveRideBar from './components/ActiveRideBar';
+import NetworkBanner from './components/NetworkBanner';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 
@@ -95,9 +97,11 @@ const App = () => {
 
   return (
     <BrowserRouter>
+      <NetworkBanner />
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/driver-login" element={<DriverLogin />} />
         <Route
           path="/home"
           element={

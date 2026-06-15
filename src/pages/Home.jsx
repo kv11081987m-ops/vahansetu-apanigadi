@@ -612,6 +612,7 @@ const Home = () => {
   const isBookingRef = useRef(false);
 
   const handleConfirmBooking = async () => {
+    if (!navigator.onLine) { showToast('इंटरनेट नहीं है! कनेक्शन check करें।', 'error'); return; }
     if (!user?.uid) { showToast('Pehle login karein.', 'error'); return; }
     if (!pickup) { showToast('Kripya pickup location select karein.', 'error'); return; }
     if (!destination) { showToast('Kripya destination select karein.', 'error'); return; }
@@ -854,6 +855,7 @@ const Home = () => {
   };
 
   const handleSharedBooking = async () => {
+    if (!navigator.onLine) { showToast('इंटरनेट नहीं है! कनेक्शन check करें।', 'error'); return; }
     if (!selectedRoute || !selectedBoardingStop || !selectedDropStop) return;
     sharedBookingAbortRef.current = false;
     setSharedBookingStatus('searching');
