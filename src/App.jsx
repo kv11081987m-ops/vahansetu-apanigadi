@@ -1,15 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
-import Login from './pages/Login';
-import DriverLogin from './pages/DriverLogin';
-import Home from './pages/Home';
-import Dashboard from './pages/Dashboard';
-import AdminDashboard from './pages/AdminDashboard';
 import ActiveRideBar from './components/ActiveRideBar';
 import NetworkBanner from './components/NetworkBanner';
-import PrivacyPolicy from './pages/PrivacyPolicy';
-import TermsOfService from './pages/TermsOfService';
+
+const Login = lazy(() => import('./pages/Login'));
+const DriverLogin = lazy(() => import('./pages/DriverLogin'));
+const Home = lazy(() => import('./pages/Home'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -33,6 +34,12 @@ const AdminRoute = ({ children }) => {
   if (!userProfile || userProfile.role !== 'admin') return <Navigate to="/" />;
   return children;
 };
+
+const PageLoader = () => (
+  <div className="h-screen flex items-center justify-center bg-white">
+    <div className="animate-spin w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full" />
+  </div>
+);
 
 const App = () => {
   const { user, userProfile, loading } = useAuth();
@@ -98,39 +105,41 @@ const App = () => {
   return (
     <BrowserRouter>
       <NetworkBanner />
-      <Routes>
-        <Route path="/" element={<Login />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/driver-login" element={<DriverLogin />} />
-        <Route
-          path="/home"
-          element={
-            <ProtectedRoute>
-              <Home />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin"
-          element={
-            <AdminRoute>
-              <AdminDashboard />
-            </AdminRoute>
-          }
-        />
-        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-        <Route path="/terms" element={<TermsOfService />} />
-        {/* Fallback */}
-        <Route path="*" element={user && homePath ? <Navigate to={homePath} /> : <Navigate to="/" />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<Login />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/driver-login" element={<DriverLogin />} />
+          <Route
+            path="/home"
+            element={
+              <ProtectedRoute>
+                <Home />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminDashboard />
+              </AdminRoute>
+            }
+          />
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
+          {/* Fallback */}
+          <Route path="*" element={user && homePath ? <Navigate to={homePath} /> : <Navigate to="/" />} />
+        </Routes>
+      </Suspense>
       <ActiveRideBar />
 
       {/* Double-back exit toast */}

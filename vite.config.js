@@ -10,6 +10,21 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/__tests__/setup.js'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/firebase')) return 'firebase';
+          if (id.includes('node_modules/@react-google-maps')) return 'maps';
+          if (
+            id.includes('node_modules/react/') ||
+            id.includes('node_modules/react-dom/') ||
+            id.includes('node_modules/react-router-dom/')
+          ) return 'vendor';
+        }
+      }
+    }
+  },
   plugins: [
     tailwindcss(),
     react(),
