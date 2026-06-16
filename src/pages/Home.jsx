@@ -294,7 +294,8 @@ const Home = () => {
   }, [boardingSearchStop, dropSearchStop, sharedRoutes]);
 
   const handleShareReferral = async () => {
-    const refLink = `https://vahansetuapnigadi.web.app/?ref=${userProfile?.displayId}`;
+    if (!userProfile?.displayId) return;
+    const refLink = `https://vahansetuapnigadi.web.app/?ref=${userProfile.displayId}`;
     const message = `🚗 VahanSetu ApniGadi try karein!\n\nDeoria ka pehla e-Rickshaw app.\nMere code se signup karo aur ₹${config.referralRefereeReward || 25} bonus pao!\n\n📲 ${refLink}\n\nअपनी गाड़ी, अपनी मर्ज़ी 🚗`;
     if (navigator.share) {
       try { await navigator.share({ title: 'VahanSetu ApniGadi', text: message }); } catch { /* user cancelled */ }
