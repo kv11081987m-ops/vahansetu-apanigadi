@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo, startTransition } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GoogleMap, useJsApiLoader, Marker, Polyline } from '@react-google-maps/api';
 import {
@@ -291,6 +292,16 @@ const Home = () => {
     });
     setFilteredRoutes(filtered);
   }, [boardingSearchStop, dropSearchStop, sharedRoutes]);
+
+  const handleShareReferral = async () => {
+    const refLink = `https://vahansetuapnigadi.web.app/?ref=${userProfile?.displayId}`;
+    const message = `🚗 VahanSetu ApniGadi try karein!\n\nDeoria ka pehla e-Rickshaw app.\nMere code se signup karo aur ₹${config.referralRefereeReward || 25} bonus pao!\n\n📲 ${refLink}\n\nअपनी गाड़ी, अपनी मर्ज़ी 🚗`;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'VahanSetu ApniGadi', text: message }); } catch { /* user cancelled */ }
+    } else {
+      window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank');
+    }
+  };
 
   // handleShareRide
   const handleShareRide = () => {
@@ -2261,7 +2272,23 @@ const Home = () => {
 
                   {/* Your VS-ID share card */}
                   <div className="bg-slate-900 rounded-3xl p-5">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Aapka Referral Code</p>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Aapka Referral Code</p>
+
+                    {/* QR Code */}
+                    {userProfile?.displayId && (
+                      <div className="flex justify-center mb-4">
+                        <div className="bg-white p-3 rounded-2xl">
+                          <QRCodeSVG
+                            value={`https://vahansetuapnigadi.web.app/?ref=${userProfile.displayId}`}
+                            size={176}
+                            fgColor="#1E3A8A"
+                            bgColor="#FFFFFF"
+                            level="M"
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between bg-white/10 rounded-2xl px-4 py-3 mb-4">
                       <span className="text-2xl font-black text-white tracking-widest">{userProfile?.displayId || 'VS-...'}</span>
                       <button
@@ -2276,13 +2303,10 @@ const Home = () => {
                       </button>
                     </div>
                     <button
-                      onClick={() => {
-                        const text = `VahanSetu pe ride book karo! Mera referral code use karo: ${userProfile?.displayId}\n\nRegister karo: https://vahansetuapnigadi.web.app\n\nPehli ride pe tumhe ₹${config.referralRefereeReward} milenge, mujhe ₹${config.referralReferrerReward}!`;
-                        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-                      }}
+                      onClick={handleShareReferral}
                       className="w-full py-3 bg-emerald-500 text-white rounded-2xl font-black text-[11px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
                     >
-                      <Users size={14} /> WhatsApp pe Share Karo
+                      <span>📤</span> दोस्तों को भेजें
                     </button>
                   </div>
 
