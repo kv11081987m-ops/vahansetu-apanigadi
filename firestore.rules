@@ -187,8 +187,13 @@ service cloud.firestore {
         isAdmin()
       );
 
+      // Passenger rates driver after ride
       allow create: if isCustomer()
         && request.resource.data.userId == request.auth.uid;
+
+      // Driver rates passenger after ride
+      allow create: if isDriver()
+        && request.resource.data.driverId == request.auth.uid;
 
       allow update, delete: if isAdmin();
     }
@@ -262,14 +267,13 @@ service cloud.firestore {
 
 
     // ── SHARED BOOKINGS ───────────────────────────────────────────────────────
-    // Each booking belongs to a passenger; driver reads to show passenger list.
+    // Each booking belongs to a passenger; driver reads only bookings for their own ride.
     match /shared_bookings/{bookingId} {
       allow read: if isLoggedIn() && (
         resource.data.passengerId == request.auth.uid ||
         resource.data.driverId == request.auth.uid ||
         isAdmin()
       );
-      allow read: if isDriver();
       allow create: if isCustomer()
         && request.resource.data.passengerId == request.auth.uid;
       allow update: if isCustomer() && resource.data.passengerId == request.auth.uid

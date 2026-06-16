@@ -1263,8 +1263,9 @@ const Home = () => {
     }
   }, [bookingStatus]);
 
-  const scheduleMin = nowPlus30Min();
-  const scheduleMax = nowPlus7Days();
+  // Recompute when user opens the scheduling toggle so min time is never stale
+  const scheduleMin = useMemo(() => nowPlus30Min(), [isScheduled]);
+  const scheduleMax = useMemo(() => nowPlus7Days(), [isScheduled]);
 
   // Fetch upcoming scheduled rides when sidebar modal opens
   useEffect(() => {
@@ -1402,28 +1403,17 @@ const Home = () => {
         razorpayPaymentId: response.razorpay_payment_id || null
       });
 
-      await addDoc(collection(db, 'transactions'), {
-        rideId: requestId,
-        userId: user.uid,
-        driverId: driver.id,
-        amount: amount,
-        promoCode: discount > 0 ? (appliedPromo?.code || null) : null,
-        promoDiscount: discount || null,
-        status: 'success',
-        method: method,
-        confirmedBy: method === 'cash' ? 'passenger' : 'system',
-        timestamp: serverTimestamp()
-      });
-
       const driverEarning = Math.round(amount * (1 - (config.commissionPercent || 8) / 100));
+      let cashSkipped = false;
 
       if (method === 'cash') {
-        // cashCredited guard prevents double-deduction if driver also clicks "Cash Mila"
+        // transactions record + wallet update + stats are ALL inside the cashCredited guard
+        // so concurrent driver "Cash Mila" click cannot create duplicate accounting records
         const commission = Math.round(amount * ((config.commissionPercent || 8) / 100));
         try {
           await runTransaction(db, async (txn) => {
             const rideSnap = await txn.get(doc(db, 'ride_requests', requestId));
-            if (rideSnap.data()?.cashCredited) return; // driver ne pehle update kar diya
+            if (rideSnap.data()?.cashCredited) { cashSkipped = true; return; }
             txn.update(doc(db, 'ride_requests', requestId), { cashCredited: true });
             txn.update(doc(db, 'drivers', driver.id), {
               walletBalance: increment(-commission),
@@ -1440,13 +1430,38 @@ const Home = () => {
               note: `Cash ride (passenger confirmed) - Fare ₹${amount}, Commission ₹${commission}`,
               createdAt: serverTimestamp(),
             });
+            txn.set(doc(collection(db, 'transactions')), {
+              rideId: requestId,
+              userId: user.uid,
+              driverId: driver.id,
+              amount: amount,
+              promoCode: discount > 0 ? (appliedPromo?.code || null) : null,
+              promoDiscount: discount || null,
+              status: 'success',
+              method: 'cash',
+              confirmedBy: 'passenger',
+              timestamp: serverTimestamp(),
+            });
           });
         } catch (cashErr) {
           console.warn('[cash-wallet]', cashErr);
           // Non-critical — payment status set hai, admin wallet manually fix kar sakta hai
         }
       } else {
-        // Online: platform has money — credit 92.5% after commission
+        // Online: transaction record created immediately (Razorpay already confirmed server-side)
+        await addDoc(collection(db, 'transactions'), {
+          rideId: requestId,
+          userId: user.uid,
+          driverId: driver.id,
+          amount: amount,
+          promoCode: discount > 0 ? (appliedPromo?.code || null) : null,
+          promoDiscount: discount || null,
+          status: 'success',
+          method: method,
+          confirmedBy: 'system',
+          timestamp: serverTimestamp()
+        });
+        // Credit driver wallet after commission
         await updateDoc(doc(db, 'drivers', driver.id), {
           walletBalance: increment(driverEarning),
           totalEarnings: increment(amount),
@@ -1486,8 +1501,10 @@ const Home = () => {
         }
       } catch (e) { console.warn('[referral-fallback]', e); }
 
-      // Increment global revenue counter (setDoc with merge creates doc if absent)
-      setDoc(doc(db, 'config', 'stats'), { totalRevenue: increment(amount) }, { merge: true }).catch(() => {});
+      // Increment global revenue counter — skip if cash was already credited by driver side
+      if (!cashSkipped) {
+        setDoc(doc(db, 'config', 'stats'), { totalRevenue: increment(amount) }, { merge: true }).catch(() => {});
+      }
 
       clearTimeout(postPaymentTimerRef.current);
       postPaymentTimerRef.current = setTimeout(() => setActiveRide(null), 2000);

@@ -1234,7 +1234,10 @@ const DriverDashboard = () => {
           createdAt: serverTimestamp()
         });
       });
-    } catch { return; }
+    } catch (err) {
+      console.error('[handleDropPassenger] error:', err);
+      showToast('यात्री drop करने में समस्या आई। Network check करें।', 'error');
+    }
   };
 
   const handleCompleteSharedTrip = async () => {
